@@ -1,0 +1,1371 @@
+#!/usr/bin/env python3
+"""Fill the study-guide template with the FMA CT-1 content."""
+import pathlib, re
+
+HERE = pathlib.Path(__file__).parent
+tpl = (HERE / "index.html").read_text()
+
+# Accounting-specific presentation: the ruled General Journal, real T-accounts,
+# and the three-line statement heading — laid out the way it must appear on the script.
+EXTRA_CSS = r"""
+  /* ---------- GENERAL JOURNAL (ruled, textbook format) ---------- */
+  .gj{margin:16px 0;border:1px solid var(--line);border-radius:8px;overflow:hidden;background:var(--panel)}
+  .gj .gjhead{display:flex;justify-content:space-between;align-items:baseline;
+    background:var(--panel2);padding:7px 12px;border-bottom:2px solid var(--line);
+    font-weight:800;letter-spacing:.06em;font-size:12px;text-transform:uppercase}
+  .gj .gjhead .pg{font-weight:600;letter-spacing:0;text-transform:none;color:var(--muted)}
+  .gj table{margin:0;font-size:14px;border:0}
+  .gj th{background:transparent;font-size:11px;letter-spacing:.04em;text-transform:uppercase;
+    color:var(--muted);font-weight:700;border:0;border-bottom:1px solid var(--line);padding:6px 10px}
+  .gj td{border:0;border-bottom:1px solid color-mix(in srgb,var(--line) 45%,transparent);padding:5px 10px}
+  .gj tr:last-child td{border-bottom:0}
+  .gj .dt{white-space:nowrap;width:76px;color:var(--muted)}
+  .gj .ref{width:44px;text-align:center;color:var(--muted);font-size:12px}
+  .gj .amt{width:96px;text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+  .gj .cr-title{padding-left:34px}          /* credit account is indented — marks depend on it */
+  .gj .expl{padding-left:34px;font-style:italic;color:var(--muted);font-size:13px}
+  .gj .sep td{border-bottom:1px solid var(--line);padding:0;height:6px}
+
+  /* ---------- T-ACCOUNTS ---------- */
+  .tgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(215px,1fr));gap:14px;margin:16px 0}
+  .tacct{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:8px 10px 10px}
+  .tacct .nm{text-align:center;font-weight:800;font-size:13.5px;padding-bottom:5px;
+    border-bottom:2px solid var(--ink);margin-bottom:0}
+  .tacct .tt{display:grid;grid-template-columns:1fr 1fr;font-variant-numeric:tabular-nums;font-size:13.5px}
+  .tacct .tt>div{padding:2px 7px}
+  .tacct .tt>div:nth-child(odd){border-right:2px solid var(--ink);text-align:right}
+  .tacct .bal{grid-column:1/-1;border-top:1px solid var(--line);margin-top:4px;padding-top:5px;
+    text-align:center;font-weight:800;color:var(--accent2);border-right:0!important}
+  .tacct .empty{color:transparent}
+
+  /* ---------- FINANCIAL STATEMENT / TRIAL BALANCE HEADING ---------- */
+  .stmt{margin:18px 0;border:1px solid var(--line);border-radius:8px;background:var(--panel);padding:14px 16px}
+  .stmt .hd{text-align:center;line-height:1.35;margin-bottom:10px}
+  .stmt .hd .co{font-weight:800;text-transform:uppercase;letter-spacing:.04em;font-size:14.5px}
+  .stmt .hd .ti{font-weight:700;font-size:14px}
+  .stmt .hd .dt{font-size:13px;color:var(--muted)}
+  .stmt table{margin:0;border:0;font-size:14px}
+  .stmt th,.stmt td{border:0;padding:4px 8px}
+  .stmt td.amt{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap;width:104px}
+  .stmt tr.tot td{border-top:1px solid var(--ink);font-weight:800;
+    border-bottom:3px double var(--ink)}   /* totals double-underlined, as the rule requires */
+  .stmt .sub{padding-left:22px}
+
+  /* ---------- mobile: let the ruled forms scroll instead of blowing out the page ---------- */
+  @media (max-width:760px){
+    .gj,.stmt{overflow-x:auto;-webkit-overflow-scrolling:touch}
+    .gj table,.stmt table{display:table;min-width:500px}
+    .gj .gjhead{min-width:500px}
+    .tgrid{grid-template-columns:1fr}
+  }
+"""
+
+TITLE = "FMA CT-1 — Basic Accounting &amp; The Recording Process"
+META = ("Teaching-style study guide for Financial and Managerial Accounting Class Test 1 — "
+        "Chapter 1 Basic Accounting and Chapter 2 The Recording Process. Built from zero, "
+        "with hard-facts recall tables, fill-in-the-blank drills and fully worked solutions.")
+
+NAV = """
+      <a href="#orient">Start</a>
+      <a href="#c1-what">1 · What accounting is</a>
+      <a href="#c1-gaap">1 · GAAP &amp; assumptions</a>
+      <a href="#c1-eq">1 · The equation</a>
+      <a href="#c1-trans">1 · Transactions</a>
+      <a href="#c1-stmts">1 · Four statements</a>
+      <a href="#c2-dc">2 · Debits &amp; credits</a>
+      <a href="#c2-journal">2 · The journal</a>
+      <a href="#c2-ledger">2 · Ledger &amp; posting</a>
+      <a href="#c2-tb">2 · Trial balance</a>
+      <a href="#beyers">Full worked problem</a>
+      <a href="#practice">Practice</a>
+      <a href="#checklist">Night before</a>"""
+
+PILLS = ('<span class="pill">Chapter 1 · Basic Accounting</span>'
+         '<span class="pill">Chapter 2 · The Recording Process</span>'
+         '<span class="pill">CT-1 · Sun 2 Aug 2026, 08:30</span>')
+
+SOURCE = ("Built from the course slide decks of <b>Awlad Hosen Sagar (PhD)</b>, Associate Professor, "
+          "Department of Finance, University of Chittagong — <i>Financial and Managerial Accounting</i>, "
+          "Chapters 1 &amp; 2. Running example (Softbyte) and problem E2.17 follow Weygandt, "
+          "<i>Financial Accounting</i>. Every figure here has been recomputed and verified.")
+
+FOOTER = ("Study guide for FMA Class Test 1 · Chapters 1 &amp; 2 · course by Awlad Hosen Sagar (PhD), "
+          "Dept. of Finance, University of Chittagong. Explanations and diagrams are original; "
+          "worked examples follow the course slides and Weygandt <i>Financial Accounting</i>. "
+          "All totals independently recomputed.")
+
+# ───────────────────────────────────────────────────────────── CONTENT ──
+CONTENT = r"""
+<section id="orient">
+  <h2><span class="kicker">Read this first</span>What you're walking into</h2>
+  <p>This guide assumes you have never opened an accounting book. By the end of it you'll be able to
+  take a list of business events and turn them into journal entries, a ledger, a trial balance and a set
+  of financial statements — and, just as importantly, <i>name</i> everything correctly, because that's
+  where the marks actually are.</p>
+
+  <div class="why"><span class="tag">The shape of the paper</span>
+  Last time this exam ran, it was <b>20 marks</b>, split like this: <b>5 marks of fill-in-the-blanks</b>,
+  <b>5 marks of short questions</b>, and <b>10 marks of long questions</b>. Crucially, the questions were
+  <b>informative</b>, not just procedural — things like <i>"what is this called?"</i>, <i>"what are the
+  three…?"</i>, <i>"which body sets this?"</i>. Understanding the idea is not enough; you must be able to
+  produce the <b>exact term</b>. That's why every section here ends with a <b>Hard Facts</b> table — that
+  table is your fill-in-the-blank insurance.</div>
+
+  <div class="tip"><span class="tag">🎯 How to use this</span>
+  Read straight through once for understanding. Then, the night before, read <b>only</b> the Hard Facts
+  tables and the checklist at the very bottom. Then do the practice section with the answers hidden.</div>
+</section>
+
+<!-- ══════════════════════════════ CHAPTER 1 ══════════════════════════════ -->
+
+<section id="c1-what">
+  <h2><span class="kicker">Chapter 1 · LO 1</span>What accounting actually is, and who reads it</h2>
+
+  <div class="why"><span class="tag">Why we care</span>
+  Imagine you run a small shop. Money comes in, money goes out, you owe a supplier, a customer owes you.
+  At the end of the month someone asks a simple question: <i>did you make money?</i> You genuinely cannot
+  answer it from memory. Accounting exists to answer that question reliably — and to answer it in a way
+  a bank, a tax office or an investor will accept.</div>
+
+  <p><b>Accounting</b> is the process of keeping financial records — more precisely, a systematic process
+  of <b>identifying, recording, measuring, classifying, verifying, summarising and communicating</b>
+  financial information. It reveals the profit or loss for a given period, and the value and nature of a
+  firm's assets, liabilities and owner's equity.</p>
+
+  <div class="def"><span class="tag">📌 The definition to memorise</span>
+  Accounting consists of <b>three basic activities</b> — it <b>identifies</b>, <b>records</b>, and
+  <b>communicates</b> the economic events of an organisation to interested users.</div>
+
+  <p>Those three words are worth learning in order, because "state the three basic activities of
+  accounting" is about as classic a short question as this subject has. Here's what each one means:</p>
+
+  <div class="diagram">
+    <svg viewBox="0 0 640 150" role="img" aria-label="The three activities of accounting: identify, record, communicate">
+      <defs><marker id="ar" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto">
+        <path d="M0,0 L0,6 L8,3 z" fill="#64748b"/></marker></defs>
+      <rect x="18" y="38" width="160" height="66" rx="10" fill="#e0f2fe" stroke="#0284c7" stroke-width="2"/>
+      <text x="98" y="64" text-anchor="middle" font-size="16" font-weight="700" fill="#0c4a6e">IDENTIFY</text>
+      <text x="98" y="86" text-anchor="middle" font-size="12" fill="#0c4a6e">which events matter?</text>
+      <rect x="240" y="38" width="160" height="66" rx="10" fill="#dcfce7" stroke="#16a34a" stroke-width="2"/>
+      <text x="320" y="64" text-anchor="middle" font-size="16" font-weight="700" fill="#14532d">RECORD</text>
+      <text x="320" y="86" text-anchor="middle" font-size="12" fill="#14532d">log them, in money</text>
+      <rect x="462" y="38" width="160" height="66" rx="10" fill="#fef3c7" stroke="#d97706" stroke-width="2"/>
+      <text x="542" y="64" text-anchor="middle" font-size="16" font-weight="700" fill="#78350f">COMMUNICATE</text>
+      <text x="542" y="86" text-anchor="middle" font-size="12" fill="#78350f">report to users</text>
+      <line x1="182" y1="71" x2="234" y2="71" stroke="#64748b" stroke-width="2" marker-end="url(#ar)"/>
+      <line x1="404" y1="71" x2="456" y2="71" stroke="#64748b" stroke-width="2" marker-end="url(#ar)"/>
+      <text x="320" y="132" text-anchor="middle" font-size="12" fill="#64748b">bookkeeping is only the middle box</text>
+    </svg>
+    <div class="caption">Figure 1 — the three activities. Note where bookkeeping sits.</div>
+  </div>
+
+  <div class="confusion"><span class="tag">⚠️ Common mix-up</span>
+  <b>Bookkeeping is not accounting.</b> The accounting process <i>includes</i> the bookkeeping function,
+  but bookkeeping is only the <b>recording</b> part. Accounting also identifies what's worth recording and
+  communicates the result. Examiners love this distinction.</div>
+
+  <h3>Who reads all this?</h3>
+  <p>Users split into two camps, and the split is simply <b>are you inside the company or outside it?</b></p>
+
+  <table>
+    <thead><tr><th>Internal users</th><th>External users</th></tr></thead>
+    <tbody>
+      <tr><td>Managers <i>inside</i> the business — marketing, human resources, finance, production
+          (e.g. store manager, production supervisor)</td>
+          <td>Everyone <i>outside</i> — investors, creditors, taxing authorities (e.g. the tax office),
+          regulatory agencies (e.g. SEC), customers, labour unions, suppliers</td></tr>
+      <tr><td>Ask: <i>"Which product should we emphasise?" · "Can we raise employee salaries?" ·
+          "What does it cost to manufacture each unit?" · "Do we have enough cash?"</i></td>
+          <td>Ask: <i>"Did the company earn a satisfactory income?" · "Will the company be able to pay
+          its debts?" · "Is it a good investment?"</i></td></tr>
+    </tbody>
+  </table>
+
+  <div class="tip"><span class="tag">🎯 Exam tip</span>
+  The slide quiz gives you a list — <i>customer, store manager, SEC, suppliers, production supervisor</i> —
+  and asks you to sort them. Answer: store manager and production supervisor are <b>internal</b>;
+  customer, SEC and suppliers are <b>external</b>. The rule of thumb: if they draw a salary from the
+  company, they're internal.</div>
+
+  <div class="facts"><span class="tag">Hard facts — LO 1</span>
+  <table>
+    <tbody>
+      <tr><td>Three basic activities of accounting</td><td><b>Identifies · Records · Communicates</b> (in that order)</td></tr>
+      <tr><td>Full systematic-process definition</td><td>identifying, recording, measuring, classifying, verifying, summarising, communicating</td></tr>
+      <tr><td>Bookkeeping is…</td><td>only the <b>recording</b> function — a <i>part</i> of accounting</td></tr>
+      <tr><td>Internal users</td><td>marketing, human resources, finance, production managers</td></tr>
+      <tr><td>External users</td><td>investors, creditors, taxing authorities, regulatory agencies, customers, labour unions</td></tr>
+      <tr><td>Accounting reveals</td><td>profit or loss for a period; value &amp; nature of assets, liabilities, owner's equity</td></tr>
+    </tbody>
+  </table></div>
+</section>
+
+<section id="c1-gaap">
+  <h2><span class="kicker">Chapter 1 · LO 2</span>The building blocks: ethics, principles, assumptions</h2>
+
+  <div class="why"><span class="tag">Why we care</span>
+  If every company invented its own way of reporting profit, no two sets of accounts could ever be
+  compared — and every company would quietly pick the method that flatters it most. So the profession
+  agreed on a common rulebook.</div>
+
+  <div class="def"><span class="tag">📌 Definition</span>
+  <b>Generally Accepted Accounting Principles (GAAP)</b> — standards that are generally accepted and
+  universally practised. These standards indicate <b>how to report economic events</b>.</div>
+
+  <p>Learn that acronym expansion cold. "GAAP stands for ______" is exactly the kind of free mark this
+  paper hands out.</p>
+
+  <h3>Who writes the rules — the three standard-setting bodies</h3>
+  <table>
+    <thead><tr><th>Acronym</th><th>Full name</th><th>What it is</th></tr></thead>
+    <tbody>
+      <tr><td><b>FASB</b></td><td>Financial Accounting Standards Board</td><td>The primary US standard-setting body</td></tr>
+      <tr><td><b>SEC</b></td><td>Securities and Exchange Commission</td><td>US government agency overseeing financial markets</td></tr>
+      <tr><td><b>IASB</b></td><td>International Accounting Standards Board</td><td>Sets international standards (IFRS)</td></tr>
+    </tbody>
+  </table>
+
+  <h3>The two measurement principles</h3>
+  <p>When you put an asset on the books, at <i>what number</i> do you put it? There are two answers, and
+  choosing between them is a genuine trade-off.</p>
+
+  <div class="def"><span class="tag">📌 Historical Cost Principle</span>
+  (also called the <b>cost principle</b>) dictates that companies record assets at <b>their cost</b>.</div>
+
+  <div class="def"><span class="tag">📌 Fair Value Principle</span>
+  states that assets and liabilities should be reported at <b>fair value</b> — the price received to sell
+  an asset or settle a liability.</div>
+
+  <div class="analogy"><span class="tag">💡 Think of it like…</span>
+  You bought a flat for ৳50 lakh in 2015; today it's worth ৳90 lakh. <b>Historical cost</b> says put ৳50
+  lakh on the books — it's a hard, checkable fact backed by a receipt. <b>Fair value</b> says ৳90 lakh —
+  far more <i>useful</i> for a decision today, but it's an estimate and someone has to be trusted to make
+  it. That tension has a name in the slides: the choice <b>relates to trade-offs between
+  <i>relevance</i> and <i>faithful representation</i></b>.</div>
+
+  <h3>The two assumptions</h3>
+  <div class="def"><span class="tag">📌 Monetary Unit Assumption</span>
+  requires that companies include in the accounting records <b>only transaction data that can be expressed
+  in terms of money</b>.</div>
+  <p>This is why the health of the CEO, or how loyal your customers feel, never appears in the accounts —
+  real and important, but not measurable in taka.</p>
+
+  <div class="def"><span class="tag">📌 Economic Entity Assumption</span>
+  requires that the activities of the entity be <b>kept separate and distinct from the activities of its
+  owner and all other economic entities</b>.</div>
+  <p>Your business's money is not your money. If you take cash out for a personal expense, that isn't a
+  business expense — it's a <b>drawing</b>, which we'll meet shortly.</p>
+
+  <div class="tip"><span class="tag">🎯 Exam tip</span>
+  Straight from the slides: <i>"Combining the activities of Kellogg and General Mills would violate the
+  ______"</i> → the <b>economic entity assumption</b>. Two separate companies, two separate sets of books.</div>
+
+  <h3>Three forms of business ownership</h3>
+  <table>
+    <thead><tr><th></th><th>Proprietorship</th><th>Partnership</th><th>Corporation</th></tr></thead>
+    <tbody>
+      <tr><td><b>Owned by</b></td><td>One person</td><td>Two or more persons</td><td>Shareholders — ownership divided into <b>shares of stock</b></td></tr>
+      <tr><td><b>Legal status</b></td><td>Not separate from owner</td><td>Governed by a <b>partnership agreement</b></td><td><b>Separate legal entity</b> organised under state corporation law</td></tr>
+      <tr><td><b>Liability</b></td><td>Owner personally liable for all debts</td><td>Generally <b>unlimited personal liability</b></td><td><b>Limited liability</b></td></tr>
+      <tr><td><b>Typical</b></td><td>Owner is often manager/operator; receives all profits, suffers all losses</td><td>Often retail and service-type businesses</td><td>Larger businesses</td></tr>
+    </tbody>
+  </table>
+
+  <div class="tip"><span class="tag">🎯 Exam tip</span>
+  <i>"A business organised as a separate legal entity under state law having ownership divided into shares
+  of stock is a ______"</i> → a <b>corporation</b>. That exact sentence is on the slides; expect it
+  near-verbatim.</div>
+
+  <div class="facts"><span class="tag">Hard facts — LO 2</span>
+  <table>
+    <tbody>
+      <tr><td>GAAP</td><td><b>G</b>enerally <b>A</b>ccepted <b>A</b>ccounting <b>P</b>rinciples</td></tr>
+      <tr><td>FASB</td><td>Financial Accounting Standards Board</td></tr>
+      <tr><td>SEC</td><td>Securities and Exchange Commission</td></tr>
+      <tr><td>IASB</td><td>International Accounting Standards Board</td></tr>
+      <tr><td>Historical cost principle</td><td>record assets at <b>their cost</b></td></tr>
+      <tr><td>Fair value principle</td><td>report at <b>fair value</b> = price received to sell an asset / settle a liability</td></tr>
+      <tr><td>The trade-off between the two</td><td><b>relevance</b> vs <b>faithful representation</b></td></tr>
+      <tr><td>Monetary unit assumption</td><td>only data expressible <b>in terms of money</b></td></tr>
+      <tr><td>Economic entity assumption</td><td>entity's activities kept <b>separate and distinct</b> from its owner and other entities</td></tr>
+      <tr><td>Three forms of ownership</td><td><b>Proprietorship · Partnership · Corporation</b></td></tr>
+      <tr><td>Corporation ownership unit</td><td><b>shares of stock</b>; limited liability; separate legal entity</td></tr>
+      <tr><td>The five financial statements listed in Ch 1</td><td>Balance Sheet · Income Statement · Statement of Owner's Equity · Statement of Cash Flows · <b>Note Disclosure</b></td></tr>
+    </tbody>
+  </table></div>
+</section>
+
+<section id="c1-eq">
+  <h2><span class="kicker">Chapter 1 · LO 3</span>The accounting equation</h2>
+
+  <div class="why"><span class="tag">Why we care</span>
+  Everything a business owns had to be paid for by somebody. Either a lender put up the money, or the
+  owner did. That single sentence, written in symbols, is the whole framework accounting is built on.</div>
+
+  <div class="fml"><span class="lbl">The basic accounting equation</span>
+  Assets = Liabilities + Owner's Equity</div>
+
+  <p>The slides describe it as providing the <b>underlying framework</b> for recording and summarising
+  economic events. Two consequences follow immediately: <b>assets are claimed by either creditors or
+  owners</b>, and <b>if a business is liquidated, the claims of creditors must be paid before ownership
+  claims</b>. Creditors get paid first — that's why liabilities sit ahead of equity in the equation.</p>
+
+  <div class="diagram">
+    <svg viewBox="0 0 620 170" role="img" aria-label="Assets equal liabilities plus owner's equity">
+      <rect x="20" y="45" width="180" height="70" rx="10" fill="#dbeafe" stroke="#2563eb" stroke-width="2"/>
+      <text x="110" y="76" text-anchor="middle" font-size="17" font-weight="700" fill="#1e3a8a">ASSETS</text>
+      <text x="110" y="98" text-anchor="middle" font-size="11.5" fill="#1e3a8a">what the business owns</text>
+      <text x="222" y="88" text-anchor="middle" font-size="26" font-weight="700" fill="#475569">=</text>
+      <rect x="246" y="45" width="164" height="70" rx="10" fill="#fee2e2" stroke="#dc2626" stroke-width="2"/>
+      <text x="328" y="76" text-anchor="middle" font-size="17" font-weight="700" fill="#7f1d1d">LIABILITIES</text>
+      <text x="328" y="98" text-anchor="middle" font-size="11.5" fill="#7f1d1d">creditors' claims</text>
+      <text x="428" y="88" text-anchor="middle" font-size="26" font-weight="700" fill="#475569">+</text>
+      <rect x="448" y="45" width="152" height="70" rx="10" fill="#dcfce7" stroke="#16a34a" stroke-width="2"/>
+      <text x="524" y="76" text-anchor="middle" font-size="16" font-weight="700" fill="#14532d">OWNER'S EQUITY</text>
+      <text x="524" y="98" text-anchor="middle" font-size="11.5" fill="#14532d">the owner's claim</text>
+      <text x="310" y="146" text-anchor="middle" font-size="12" fill="#64748b">paid first on liquidation →  creditors, then owners</text>
+    </svg>
+    <div class="caption">Figure 2 — the basic accounting equation.</div>
+  </div>
+
+  <h3>The three components, precisely</h3>
+  <table>
+    <thead><tr><th>Component</th><th>Definition from the slides</th><th>Examples</th></tr></thead>
+    <tbody>
+      <tr><td><b>Assets</b></td><td><b>Resources a business owns.</b> They provide future services or benefits.</td><td>Cash, Supplies, Equipment, Accounts Receivable</td></tr>
+      <tr><td><b>Liabilities</b></td><td><b>Claims against assets</b> — debts and obligations. Owed to <b>creditors</b> (the party to whom money is owed).</td><td>Accounts Payable, Notes Payable, Salaries and Wages Payable</td></tr>
+      <tr><td><b>Owner's Equity</b></td><td><b>Ownership claim on total assets.</b> Also called <b>residual equity</b>.</td><td>Owner's Capital, Owner's Drawings</td></tr>
+    </tbody>
+  </table>
+
+  <div class="confusion"><span class="tag">⚠️ Why "residual"?</span>
+  Rearrange the equation: Owner's Equity = Assets − Liabilities. The owner gets whatever is
+  <i>left over</i> after the creditors are satisfied. That leftover is the "residual", and the term
+  <b>residual equity</b> is exactly the kind of word a fill-in-the-blank targets.</div>
+
+  <h3>The expanded equation — four things move owner's equity</h3>
+  <p>Owner's equity isn't one lump. Two things push it up, two pull it down:</p>
+
+  <div class="fml"><span class="lbl">Expanded accounting equation</span>
+  Assets = Liabilities + Owner's Capital − Owner's Drawings + Revenues − Expenses</div>
+
+  <table>
+    <thead><tr><th>Increases owner's equity ↑</th><th>Decreases owner's equity ↓</th></tr></thead>
+    <tbody>
+      <tr><td><b>Investments by owner</b> — the assets the owner puts into the business</td>
+          <td><b>Drawings</b> — an owner may withdraw cash or other assets for personal use</td></tr>
+      <tr><td><b>Revenues</b> — result from business activities entered into for the purpose of earning income</td>
+          <td><b>Expenses</b> — the cost of assets consumed or services used in the process of earning revenue</td></tr>
+      <tr><td><i>Common sources of revenue:</i> sales, fees, services, commissions, interest, dividends, royalties, rent</td>
+          <td><i>Common expenses:</i> salaries expense, rent expense, utilities expense, tax expense</td></tr>
+    </tbody>
+  </table>
+
+  <div class="tip"><span class="tag">🎯 Exam tip</span>
+  Those two lists of examples are prime fill-in-the-blank material — "name three common sources of
+  revenue" is a gift if you've memorised the eight. Note that <b>dividends</b> appears as a source of
+  <i>revenue</i> here (income the business receives from investments it holds).</div>
+
+  <div class="facts"><span class="tag">Hard facts — LO 3</span>
+  <table>
+    <tbody>
+      <tr><td>Basic accounting equation</td><td><b>Assets = Liabilities + Owner's Equity</b></td></tr>
+      <tr><td>Expanded equation</td><td>Assets = Liabilities + Owner's Capital − Owner's Drawings + Revenues − Expenses</td></tr>
+      <tr><td>Assets</td><td>resources a business <b>owns</b>; provide future services or benefits</td></tr>
+      <tr><td>Liabilities</td><td><b>claims against assets</b> — debts and obligations</td></tr>
+      <tr><td>Creditor</td><td>the party <b>to whom money is owed</b></td></tr>
+      <tr><td>Owner's equity — other name</td><td><b>residual equity</b></td></tr>
+      <tr><td>On liquidation</td><td>claims of <b>creditors</b> must be paid <b>before</b> ownership claims</td></tr>
+      <tr><td>Increase owner's equity</td><td><b>Investments by owner</b> and <b>Revenues</b></td></tr>
+      <tr><td>Decrease owner's equity</td><td><b>Drawings</b> and <b>Expenses</b></td></tr>
+      <tr><td>8 sources of revenue</td><td>sales, fees, services, commissions, interest, dividends, royalties, rent</td></tr>
+    </tbody>
+  </table></div>
+</section>
+
+<section id="c1-trans">
+  <h2><span class="kicker">Chapter 1 · LO 4</span>Transaction analysis — the Softbyte story</h2>
+
+  <div class="def"><span class="tag">📌 Definition</span>
+  <b>Transactions</b> are a business's <b>economic events recorded by accountants</b>. They may be
+  <b>external</b> or <b>internal</b>. <b>Not all activities represent transactions</b>, and each
+  transaction has a <b>dual effect</b> on the accounting equation.</div>
+
+  <p>That middle sentence matters. Before recording anything you apply one test:</p>
+
+  <div class="def"><span class="tag">📌 The recording criterion</span>
+  <b>Is the financial position (assets, liabilities, or owner's equity) of the company changed?</b>
+  If yes → record it. If no → don't.</div>
+
+  <table>
+    <thead><tr><th>Event</th><th>Record?</th><th>Why</th></tr></thead>
+    <tbody>
+      <tr><td>Purchase a computer</td><td><b>Record</b></td><td>Assets change (equipment up, cash down)</td></tr>
+      <tr><td>Discuss product design with a potential customer</td><td><b>Don't record</b></td><td>Nothing in the financial position moved — no money, no obligation</td></tr>
+      <tr><td>Pay rent</td><td><b>Record</b></td><td>Cash down, expense up</td></tr>
+    </tbody>
+  </table>
+
+  <h3>Softbyte: ten transactions, one running equation</h3>
+  <p>Ray Neal starts a smartphone app development company called <b>Softbyte</b> on <b>September 1,
+  2017</b>. We'll walk all ten events. Watch how the equation never breaks — that's the point of the
+  exercise.</p>
+
+  <div class="example"><span class="tag">✍️ The ten transactions</span>
+    <div class="step"><b>1 · Investment by owner.</b> Ray invests <b>$15,000 cash</b>.
+      → Cash <b>+15,000</b>, Owner's Capital <b>+15,000</b>. An asset and equity rise together.</div>
+    <div class="step"><b>2 · Purchase of equipment for cash.</b> Buys computer equipment for <b>$7,000
+      cash</b>. → Cash <b>−7,000</b>, Equipment <b>+7,000</b>. One asset swapped for another — total
+      assets unchanged.</div>
+    <div class="step"><b>3 · Purchase of supplies on credit.</b> Buys <b>$1,600</b> of headsets and
+      accessories, to pay in October. → Supplies <b>+1,600</b>, Accounts Payable <b>+1,600</b>.
+      Asset up, liability up.</div>
+    <div class="step"><b>4 · Services performed for cash.</b> Receives <b>$1,200 cash</b> for app
+      development. → Cash <b>+1,200</b>, Revenues <b>+1,200</b>.</div>
+    <div class="step"><b>5 · Purchase of advertising on credit.</b> Receives a <b>$250</b> bill from the
+      <b>Daily News</b>, payment postponed. → Accounts Payable <b>+250</b>, Expenses <b>+250</b>
+      (equity down). <i>The expense is recorded now, even though no cash moved.</i></div>
+    <div class="step"><b>6 · Services performed for cash and credit.</b> Performs <b>$3,500</b> of
+      services: <b>$1,500 cash</b> now, <b>$2,000 on account</b>. → Cash <b>+1,500</b>, Accounts
+      Receivable <b>+2,000</b>, Revenues <b>+3,500</b>.</div>
+    <div class="step"><b>7 · Payment of expenses.</b> Pays September rent <b>$600</b>, salaries and wages
+      <b>$900</b>, utilities <b>$200</b> — <b>$1,700</b> total. → Cash <b>−1,700</b>, Expenses
+      <b>+1,700</b>.</div>
+    <div class="step"><b>8 · Payment of accounts payable.</b> Pays the <b>$250</b> Daily News bill.
+      → Cash <b>−250</b>, Accounts Payable <b>−250</b>. <i>No expense here — it was already recorded in
+      transaction 5.</i></div>
+    <div class="step"><b>9 · Receipt of cash on account.</b> Receives <b>$600</b> from customers billed in
+      transaction 6. → Cash <b>+600</b>, Accounts Receivable <b>−600</b>. <i>No revenue here — it was
+      already earned in transaction 6.</i></div>
+    <div class="step"><b>10 · Withdrawal of cash by owner.</b> Ray withdraws <b>$1,300</b> for personal
+      use. → Cash <b>−1,300</b>, Owner's Drawings <b>+1,300</b> (equity down). <i>Not an expense — a
+      drawing.</i></div>
+  </div>
+
+  <h3>Where it lands</h3>
+  <table>
+    <thead><tr><th colspan="4">Assets</th><th>= Liabilities</th><th colspan="4">+ Owner's Equity</th></tr>
+    <tr><th>Cash</th><th>A/R</th><th>Supplies</th><th>Equipment</th><th>A/P</th><th>Capital</th><th>− Drawings</th><th>+ Rev.</th><th>− Exp.</th></tr></thead>
+    <tbody><tr>
+      <td class="num">$8,050</td><td class="num">$1,400</td><td class="num">$1,600</td><td class="num">$7,000</td>
+      <td class="num">$1,600</td><td class="num">$15,000</td><td class="num">$1,300</td><td class="num">$4,700</td><td class="num">$1,950</td>
+    </tr></tbody>
+  </table>
+  <p><b>Assets total $18,050</b> &nbsp;=&nbsp; 1,600 + 15,000 − 1,300 + 4,700 − 1,950 = <b>$18,050</b>. ✔</p>
+
+  <div class="confusion"><span class="tag">⚠️ The three classic traps</span>
+  <b>(a)</b> Transaction 5 records an <b>expense with no cash</b> — expenses are recorded when incurred,
+  not when paid. <b>(b)</b> Transaction 8 pays that bill and records <b>no expense</b> — double-counting
+  is the error being tested. <b>(c)</b> Transaction 10 is a <b>drawing, not an expense</b> — drawings are
+  the owner taking value out, and they never touch the income statement.</div>
+
+  <div class="facts"><span class="tag">Hard facts — LO 4</span>
+  <table>
+    <tbody>
+      <tr><td>Transactions are…</td><td>a business's <b>economic events recorded by accountants</b>; may be <b>external or internal</b></td></tr>
+      <tr><td>Key caveat</td><td><b>Not all activities represent transactions</b></td></tr>
+      <tr><td>Each transaction has a…</td><td><b>dual effect</b> on the accounting equation</td></tr>
+      <tr><td>Recording criterion</td><td>is the <b>financial position</b> (A, L or OE) <b>changed</b>?</td></tr>
+      <tr><td>Softbyte owner / start date</td><td><b>Ray Neal</b>, <b>September 1, 2017</b>; initial investment <span class="num">$15,000</span></td></tr>
+      <tr><td>Softbyte final totals</td><td>Assets <span class="num">$18,050</span>; Cash <span class="num">$8,050</span>; A/P <span class="num">$1,600</span>; Revenues <span class="num">$4,700</span>; Expenses <span class="num">$1,950</span>; Drawings <span class="num">$1,300</span></td></tr>
+      <tr><td>Advertising creditor in the example</td><td>the <b>Daily News</b>, <span class="num">$250</span></td></tr>
+    </tbody>
+  </table></div>
+</section>
+
+<section id="c1-stmts">
+  <h2><span class="kicker">Chapter 1 · LO 5</span>The four financial statements</h2>
+
+  <div class="def"><span class="tag">📌 Learn all four, in this order</span>
+  <b>1. Income Statement · 2. Owner's Equity Statement · 3. Balance Sheet · 4. Statement of Cash Flows</b></div>
+
+  <p>The order isn't arbitrary — each one feeds the next, and the exam loves that chain:</p>
+
+  <div class="diagram">
+    <svg viewBox="0 0 640 210" role="img" aria-label="How the four financial statements feed into each other">
+      <defs><marker id="ar2" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto">
+        <path d="M0,0 L0,6 L8,3 z" fill="#0284c7"/></marker></defs>
+      <rect x="20" y="20" width="150" height="52" rx="9" fill="#e0f2fe" stroke="#0284c7" stroke-width="2"/>
+      <text x="95" y="42" text-anchor="middle" font-size="13" font-weight="700" fill="#0c4a6e">Income Statement</text>
+      <text x="95" y="60" text-anchor="middle" font-size="11" fill="#0c4a6e">revenues − expenses</text>
+      <rect x="240" y="20" width="150" height="52" rx="9" fill="#dcfce7" stroke="#16a34a" stroke-width="2"/>
+      <text x="315" y="42" text-anchor="middle" font-size="13" font-weight="700" fill="#14532d">Owner's Equity</text>
+      <text x="315" y="60" text-anchor="middle" font-size="11" fill="#14532d">statement</text>
+      <rect x="240" y="128" width="150" height="52" rx="9" fill="#fef3c7" stroke="#d97706" stroke-width="2"/>
+      <text x="315" y="150" text-anchor="middle" font-size="13" font-weight="700" fill="#78350f">Balance Sheet</text>
+      <text x="315" y="168" text-anchor="middle" font-size="11" fill="#78350f">A = L + OE, at a date</text>
+      <rect x="460" y="128" width="158" height="52" rx="9" fill="#f3e8ff" stroke="#9333ea" stroke-width="2"/>
+      <text x="539" y="150" text-anchor="middle" font-size="13" font-weight="700" fill="#581c87">Statement of</text>
+      <text x="539" y="168" text-anchor="middle" font-size="13" font-weight="700" fill="#581c87">Cash Flows</text>
+      <line x1="172" y1="46" x2="234" y2="46" stroke="#0284c7" stroke-width="2" marker-end="url(#ar2)"/>
+      <text x="203" y="38" text-anchor="middle" font-size="10" fill="#0284c7">net income</text>
+      <line x1="315" y1="74" x2="315" y2="122" stroke="#0284c7" stroke-width="2" marker-end="url(#ar2)"/>
+      <text x="322" y="102" font-size="10" fill="#0284c7">ending equity</text>
+      <line x1="392" y1="154" x2="454" y2="154" stroke="#0284c7" stroke-width="2" marker-end="url(#ar2)"/>
+    </svg>
+    <div class="caption">Figure 3 — net income flows into owner's equity; ending equity flows into the balance sheet.</div>
+  </div>
+
+  <table>
+    <thead><tr><th>Statement</th><th>Reports</th><th>Period or date?</th></tr></thead>
+    <tbody>
+      <tr><td><b>Income Statement</b></td><td>The <b>revenues and expenses</b>. Lists revenues first, then expenses. Shows <b>net income (or net loss)</b>.</td><td>For a <b>period of time</b></td></tr>
+      <tr><td><b>Owner's Equity Statement</b></td><td>The <b>changes in owner's equity</b>. Same period as the income statement.</td><td>For a <b>period of time</b></td></tr>
+      <tr><td><b>Balance Sheet</b></td><td>The <b>assets, liabilities and owner's equity</b>. Assets listed first, then liabilities and owner's equity. A <b>snapshot</b> of financial condition.</td><td>At a <b>specific date</b></td></tr>
+      <tr><td><b>Statement of Cash Flows</b></td><td><b>Cash receipts and payments.</b> Answers: where did cash come from? what was it used for? what was the change in the cash balance?</td><td>For a <b>period of time</b></td></tr>
+    </tbody>
+  </table>
+
+  <div class="confusion"><span class="tag">⚠️ Two things examiners check</span>
+  <b>(a)</b> The income statement <b>does not include investment and withdrawal transactions between the
+  owner and the business</b> in measuring net income. <b>(b)</b> Three statements cover a <i>period</i>
+  ("For the Month Ended…"), but the <b>balance sheet is at a single date</b> ("September 30, 2017").
+  Getting the heading wrong loses easy marks.</div>
+
+  <p>Here are Softbyte's statements laid out properly. Notice the <b>three-line heading</b> on each, and
+  that the first three follow in sequence — the output of one is the input of the next.</p>
+
+  <div class="stmt">
+    <div class="hd"><div class="co">Softbyte</div><div class="ti">Income Statement</div>
+      <div class="dt">For the Month Ended September 30, 2017</div></div>
+    <table><tbody>
+      <tr><td><b>Revenues</b></td><td class="amt"></td></tr>
+      <tr><td class="sub">Service revenue</td><td class="amt">$4,700</td></tr>
+      <tr><td><b>Expenses</b></td><td class="amt"></td></tr>
+      <tr><td class="sub">Salaries and wages expense</td><td class="amt">900</td></tr>
+      <tr><td class="sub">Rent expense</td><td class="amt">600</td></tr>
+      <tr><td class="sub">Advertising expense</td><td class="amt">250</td></tr>
+      <tr><td class="sub">Utilities expense</td><td class="amt">200</td></tr>
+      <tr><td class="sub"><i>Total expenses</i></td><td class="amt">1,950</td></tr>
+      <tr class="tot"><td>Net income</td><td class="amt">$2,750</td></tr>
+    </tbody></table>
+  </div>
+
+  <div class="stmt">
+    <div class="hd"><div class="co">Softbyte</div><div class="ti">Owner's Equity Statement</div>
+      <div class="dt">For the Month Ended September 30, 2017</div></div>
+    <table><tbody>
+      <tr><td>Owner's capital, September 1</td><td class="amt">$&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;−0−</td></tr>
+      <tr><td class="sub">Add: Investments</td><td class="amt">15,000</td></tr>
+      <tr><td class="sub">Add: Net income</td><td class="amt">2,750</td></tr>
+      <tr><td class="sub"></td><td class="amt">17,750</td></tr>
+      <tr><td class="sub">Less: Drawings</td><td class="amt">1,300</td></tr>
+      <tr class="tot"><td>Owner's capital, September 30</td><td class="amt">$16,450</td></tr>
+    </tbody></table>
+  </div>
+
+  <div class="stmt">
+    <div class="hd"><div class="co">Softbyte</div><div class="ti">Balance Sheet</div>
+      <div class="dt">September 30, 2017</div></div>
+    <table><tbody>
+      <tr><td><b>Assets</b></td><td class="amt"></td></tr>
+      <tr><td class="sub">Cash</td><td class="amt">$&nbsp;8,050</td></tr>
+      <tr><td class="sub">Accounts receivable</td><td class="amt">1,400</td></tr>
+      <tr><td class="sub">Supplies</td><td class="amt">1,600</td></tr>
+      <tr><td class="sub">Equipment</td><td class="amt">7,000</td></tr>
+      <tr class="tot"><td>Total assets</td><td class="amt">$18,050</td></tr>
+      <tr><td><b>Liabilities and Owner's Equity</b></td><td class="amt"></td></tr>
+      <tr><td class="sub">Accounts payable</td><td class="amt">$&nbsp;1,600</td></tr>
+      <tr><td class="sub">Owner's capital</td><td class="amt">16,450</td></tr>
+      <tr class="tot"><td>Total liabilities and owner's equity</td><td class="amt">$18,050</td></tr>
+    </tbody></table>
+  </div>
+
+  <div class="tip"><span class="tag">🎯 The check that must always hold</span>
+  Total assets <b>$18,050</b> = total liabilities + owner's equity <b>$1,600 + $16,450 = $18,050</b>. ✔
+  If your balance sheet doesn't balance, the error is upstream — recheck net income and drawings first.</div>
+
+  <div class="facts"><span class="tag">Hard facts — LO 5</span>
+  <table>
+    <tbody>
+      <tr><td>The four statements, in order</td><td><b>Income Statement · Owner's Equity Statement · Balance Sheet · Statement of Cash Flows</b></td></tr>
+      <tr><td>Income statement shows</td><td>revenues first, then expenses → <b>net income or net loss</b>, <b>for a period</b></td></tr>
+      <tr><td>Excluded from net income</td><td><b>investment and withdrawal</b> transactions between owner and business</td></tr>
+      <tr><td>Balance sheet is…</td><td>a <b>snapshot at a specific date</b>; total assets must equal total liabilities + owner's equity</td></tr>
+      <tr><td>Needed to prepare the owner's equity statement</td><td><b>net income</b> from the income statement</td></tr>
+      <tr><td>Needed to prepare the balance sheet</td><td><b>ending owner's equity</b></td></tr>
+      <tr><td>Needed to prepare the statement of cash flows</td><td><b>balance sheet and income statement</b></td></tr>
+      <tr><td>Softbyte net income / ending equity</td><td><span class="num">$2,750</span> / <span class="num">$16,450</span></td></tr>
+    </tbody>
+  </table></div>
+</section>
+
+<!-- ══════════════════════════════ CHAPTER 2 ══════════════════════════════ -->
+
+<section id="c2-dc">
+  <h2><span class="kicker">Chapter 2 · LO 1</span>Accounts, debits and credits</h2>
+
+  <div class="why"><span class="tag">Why we care</span>
+  The Chapter 1 table worked — but imagine it with 400 transactions and 60 columns. Unworkable. So we give
+  every item its own little record, and invent a shorthand for "up" and "down" that works the same way
+  everywhere. That shorthand is debits and credits.</div>
+
+  <div class="def"><span class="tag">📌 Definition</span>
+  An <b>account</b> is a record of <b>increases and decreases in a specific asset, liability, owner's
+  equity, revenue, or expense item</b>. An account can be illustrated in a <b>T-account</b> form.</div>
+
+  <div class="fml"><span class="lbl">The two words that trip everyone</span>
+  Debit = "Left" &nbsp;·&nbsp; Credit = "Right"</div>
+
+  <div class="confusion"><span class="tag">⚠️ Unlearn the everyday meaning</span>
+  Debit does <b>not</b> mean bad or decrease, and credit does <b>not</b> mean good or increase. They are
+  <b>purely positional</b>: left side, right side. Nothing more. Your bank says "credited your account"
+  because from <i>their</i> books your deposit is a liability they owe you.</div>
+
+  <div class="def"><span class="tag">📌 Double-entry system</span>
+  Each transaction must <b>affect two or more accounts</b> to keep the basic accounting equation in
+  balance. Recording is done by <b>debiting at least one account and crediting at least one other</b>.
+  <b>DEBITS must equal CREDITS.</b></div>
+
+  <p>If debits exceed credits in an account, it has a <b>debit balance</b>; if credits exceed debits, a
+  <b>credit balance</b>. Which one an account <i>should</i> have has a name:</p>
+
+  <div class="def"><span class="tag">📌 Normal balance</span>
+  The <b>normal balance is on the increase side</b> of the account.</div>
+
+  <div class="diagram">
+    <svg viewBox="0 0 640 250" role="img" aria-label="Debit and credit rules for the five account types">
+      <text x="320" y="22" text-anchor="middle" font-size="14" font-weight="700" fill="#334155">Normal balances — the whole system on one card</text>
+      <g font-size="12.5">
+        <rect x="24" y="42" width="270" height="90" rx="9" fill="#dbeafe" stroke="#2563eb" stroke-width="2"/>
+        <text x="159" y="62" text-anchor="middle" font-size="13" font-weight="700" fill="#1e3a8a">NORMAL BALANCE — DEBIT</text>
+        <text x="159" y="84" text-anchor="middle" fill="#1e3a8a">Assets</text>
+        <text x="159" y="103" text-anchor="middle" fill="#1e3a8a">Expenses</text>
+        <text x="159" y="122" text-anchor="middle" fill="#1e3a8a">Owner's Drawings</text>
+        <rect x="346" y="42" width="270" height="90" rx="9" fill="#dcfce7" stroke="#16a34a" stroke-width="2"/>
+        <text x="481" y="62" text-anchor="middle" font-size="13" font-weight="700" fill="#14532d">NORMAL BALANCE — CREDIT</text>
+        <text x="481" y="84" text-anchor="middle" fill="#14532d">Liabilities</text>
+        <text x="481" y="103" text-anchor="middle" fill="#14532d">Owner's Capital</text>
+        <text x="481" y="122" text-anchor="middle" fill="#14532d">Revenues</text>
+      </g>
+      <line x1="24" y1="150" x2="616" y2="150" stroke="#cbd5e1" stroke-width="1"/>
+      <text x="320" y="176" text-anchor="middle" font-size="12.5" fill="#475569">
+        To <tspan font-weight="700">increase</tspan> a debit-normal account → debit it.
+        To increase a credit-normal account → credit it.</text>
+      <text x="320" y="200" text-anchor="middle" font-size="12.5" fill="#475569">
+        Drawings and Expenses are the two that <tspan font-weight="700">reduce</tspan> equity — so they sit on the opposite side to Capital.</text>
+      <text x="320" y="228" text-anchor="middle" font-size="12" fill="#64748b">Balance Sheet: Assets = Liabilities + Equity &nbsp;·&nbsp; Income Statement: Revenues − Expenses</text>
+    </svg>
+    <div class="caption">Figure 4 — memorise this one card and Chapter 2 is mostly done.</div>
+  </div>
+
+  <div class="analogy"><span class="tag">💡 Think of it like…</span>
+  Owner's Capital is the "home team" on the credit side. <b>Revenues</b> help the owner, so they play on
+  the <b>same side as Capital</b> — credit. <b>Expenses</b> and <b>Drawings</b> take value away from the
+  owner, so they play on the <b>opposite side</b> — debit. The slides put it exactly this way: the effect
+  of debits and credits on revenue accounts is the <b>same as</b> their effect on Owner's Capital, and
+  expenses have the <b>opposite</b> effect.</div>
+
+  <div class="tip"><span class="tag">🎯 Exam tip</span>
+  Two multiple-choice items sit on the slides. <i>"Debits: ______"</i> → <b>increase assets and decrease
+  liabilities</b>. <i>"Accounts that normally have debit balances are: ______"</i> → <b>assets, owner's
+  drawing, and expenses</b>. Note the trap option "assets, expenses, and revenues" — revenues are
+  <b>credit</b>-normal.</div>
+
+  <div class="facts"><span class="tag">Hard facts — Ch 2 LO 1</span>
+  <table>
+    <tbody>
+      <tr><td>Account</td><td>record of <b>increases and decreases</b> in a specific asset, liability, owner's equity, revenue or expense item</td></tr>
+      <tr><td>Debit / Credit mean</td><td><b>Left</b> / <b>Right</b></td></tr>
+      <tr><td>Account illustrated in…</td><td><b>T-account</b> form</td></tr>
+      <tr><td>Double-entry rule</td><td>each transaction affects <b>two or more accounts</b>; <b>debits must equal credits</b></td></tr>
+      <tr><td>Normal balance is…</td><td>on the <b>increase side</b></td></tr>
+      <tr><td>Debit-normal accounts</td><td><b>Assets · Expenses · Owner's Drawings</b></td></tr>
+      <tr><td>Credit-normal accounts</td><td><b>Liabilities · Owner's Capital · Revenues</b></td></tr>
+      <tr><td>Revenue accounts follow…</td><td>the <b>same</b> debit/credit rules as Owner's Capital</td></tr>
+    </tbody>
+  </table></div>
+</section>
+
+<section id="c2-journal">
+  <h2><span class="kicker">Chapter 2 · LO 2</span>The journal</h2>
+
+  <div class="def"><span class="tag">📌 The four steps in the recording process</span>
+  <b>1.</b> <b>Analyse</b> each transaction (evidence comes from <b>business documents</b> — a sales slip,
+  a check, a bill). <b>2.</b> <b>Enter</b> the transaction <b>in a journal</b>. <b>3.</b> <b>Transfer</b>
+  journal information <b>to ledger accounts</b>. (Then, later, prepare a trial balance.)</div>
+
+  <div class="def"><span class="tag">📌 The journal</span>
+  The <b>book of original entry</b>. Transactions are recorded in <b>chronological order</b>.</div>
+
+  <p>It makes three named contributions to the recording process — a textbook 3-mark short question:</p>
+  <ol>
+    <li>Discloses the <b>complete effects of a transaction</b>.</li>
+    <li>Provides a <b>chronological record</b> of transactions.</li>
+    <li>Helps to <b>prevent or locate errors</b>, because debit and credit amounts can be easily compared.</li>
+  </ol>
+
+  <div class="def"><span class="tag">📌 Journalizing</span>
+  <b>Entering transaction data in the journal.</b></div>
+
+  <p>This is the layout your answer script must look like. The columns are fixed and the marks partly
+  depend on getting them right, so copy this shape exactly:</p>
+
+  <div class="gj">
+    <div class="gjhead"><span>General Journal</span><span class="pg">Page J1</span></div>
+    <table>
+      <thead><tr><th class="dt">Date</th><th>Account Titles and Explanation</th>
+        <th class="ref">Ref.</th><th class="amt">Debit</th><th class="amt">Credit</th></tr></thead>
+      <tbody>
+        <tr><td class="dt">2017<br>Sept. 1</td><td>Cash</td><td class="ref">101</td><td class="amt">15,000</td><td class="amt"></td></tr>
+        <tr><td class="dt"></td><td class="cr-title">Owner's Capital</td><td class="ref">301</td><td class="amt"></td><td class="amt">15,000</td></tr>
+        <tr><td class="dt"></td><td class="expl">(Owner's investment in business)</td><td class="ref"></td><td class="amt"></td><td class="amt"></td></tr>
+        <tr class="sep"><td colspan="5"></td></tr>
+        <tr><td class="dt">1</td><td>Equipment</td><td class="ref">157</td><td class="amt">7,000</td><td class="amt"></td></tr>
+        <tr><td class="dt"></td><td class="cr-title">Cash</td><td class="ref">101</td><td class="amt"></td><td class="amt">7,000</td></tr>
+        <tr><td class="dt"></td><td class="expl">(Purchase of equipment for cash)</td><td class="ref"></td><td class="amt"></td><td class="amt"></td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="tip"><span class="tag">🎯 The four presentation rules</span>
+  <b>(1)</b> The <b>debit account is written first</b>, flush against the left of the column.
+  <b>(2)</b> The <b>credit account is indented</b> on the line below — this is how the examiner sees at a
+  glance which is which. <b>(3)</b> A brief <b>explanation in brackets</b> goes under each entry.
+  <b>(4)</b> The <b>Ref.</b> column stays blank until you post; you fill in the ledger account number
+  <i>at</i> posting time.</div>
+
+  <div class="def"><span class="tag">📌 Compound journal entry</span>
+  An entry that involves <b>three or more accounts</b>.</div>
+
+  <div class="example"><span class="tag">✍️ Compound entry — Butler Company, July 1</span>
+    Butler purchases a delivery truck costing <b>$14,000</b>. It pays <b>$8,000 cash</b> now and agrees to
+    pay the remaining <b>$6,000 on account</b>. Note both credits are indented under the single debit.
+  </div>
+
+  <div class="gj">
+    <div class="gjhead"><span>General Journal</span><span class="pg">Page J1</span></div>
+    <table>
+      <thead><tr><th class="dt">Date</th><th>Account Titles and Explanation</th>
+        <th class="ref">Ref.</th><th class="amt">Debit</th><th class="amt">Credit</th></tr></thead>
+      <tbody>
+        <tr><td class="dt">July 1</td><td>Equipment</td><td class="ref"></td><td class="amt">14,000</td><td class="amt"></td></tr>
+        <tr><td class="dt"></td><td class="cr-title">Cash</td><td class="ref"></td><td class="amt"></td><td class="amt">8,000</td></tr>
+        <tr><td class="dt"></td><td class="cr-title">Accounts Payable</td><td class="ref"></td><td class="amt"></td><td class="amt">6,000</td></tr>
+        <tr><td class="dt"></td><td class="expl">(Purchased truck for cash and on account)</td><td class="ref"></td><td class="amt"></td><td class="amt"></td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p><b>Check:</b> one debit of 14,000 = two credits of 8,000 + 6,000. Balanced. ✔</p>
+
+  <div class="example"><span class="tag">✍️ DO IT! — Kate Browne's salon, "Hair It Is"</span>
+    <div class="step"><b>(a)</b> Deposited <b>$20,000</b> of her own money as her initial investment →
+      debit <b>Cash</b> 20,000, credit <b>Owner's Capital</b> 20,000</div>
+    <div class="step"><b>(b)</b> Purchased equipment on account for <b>$4,800</b> →
+      debit <b>Equipment</b> 4,800, credit <b>Accounts Payable</b> 4,800</div>
+    <div class="step"><b>(c)</b> Interviewed three persons for the position of hair stylist →
+      <b>No entry.</b> Interviewing changes nothing in the financial position.</div>
+  </div>
+
+  <div class="facts"><span class="tag">Hard facts — Ch 2 LO 2</span>
+  <table>
+    <tbody>
+      <tr><td>The journal is the…</td><td><b>book of original entry</b></td></tr>
+      <tr><td>Order of recording</td><td><b>chronological</b></td></tr>
+      <tr><td>Three contributions of the journal</td><td>discloses <b>complete effects</b>; provides a <b>chronological record</b>; helps <b>prevent or locate errors</b></td></tr>
+      <tr><td>Journalizing</td><td>entering <b>transaction data in the journal</b></td></tr>
+      <tr><td>Evidence of a transaction</td><td><b>business documents</b> — sales slip, check, bill</td></tr>
+      <tr><td>Compound entry</td><td>an entry involving <b>three or more accounts</b></td></tr>
+      <tr><td>Format</td><td>debit <b>first</b>, credit <b>indented</b> below</td></tr>
+      <tr><td>Butler Company truck</td><td><span class="num">$14,000</span> = <span class="num">$8,000</span> cash + <span class="num">$6,000</span> on account</td></tr>
+    </tbody>
+  </table></div>
+</section>
+
+<section id="c2-ledger">
+  <h2><span class="kicker">Chapter 2 · LO 3</span>The ledger and posting</h2>
+
+  <div class="why"><span class="tag">Why we care</span>
+  The journal tells you the story in date order, but it can't answer "how much cash do we have?" without
+  reading every page. The ledger reorganises the same information <b>by account</b>, so each balance is
+  one glance away.</div>
+
+  <div class="def"><span class="tag">📌 The general ledger</span>
+  Contains <b>all the asset, liability, and owner's equity accounts</b>.</div>
+
+  <div class="def"><span class="tag">📌 Posting</span>
+  <b>Transferring journal entries to the ledger accounts.</b></div>
+
+  <div class="analogy"><span class="tag">💡 Think of it like…</span>
+  The journal is your bank statement — everything in the order it happened. The ledger is a set of
+  labelled envelopes, one per account, where you re-file each item so you can count any one category
+  instantly. Posting is the act of moving each entry into its envelope. Same facts, different filing.</div>
+
+  <div class="diagram">
+    <svg viewBox="0 0 640 130" role="img" aria-label="The recording process: analyse, journalise, post, trial balance">
+      <defs><marker id="ar3" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto">
+        <path d="M0,0 L0,6 L8,3 z" fill="#64748b"/></marker></defs>
+      <g font-size="12.5" font-weight="700">
+        <rect x="10" y="34" width="128" height="50" rx="9" fill="#e0f2fe" stroke="#0284c7" stroke-width="2"/>
+        <text x="74" y="56" text-anchor="middle" fill="#0c4a6e">1 · ANALYSE</text>
+        <text x="74" y="73" text-anchor="middle" font-size="10.5" font-weight="400" fill="#0c4a6e">business documents</text>
+        <rect x="168" y="34" width="128" height="50" rx="9" fill="#dcfce7" stroke="#16a34a" stroke-width="2"/>
+        <text x="232" y="56" text-anchor="middle" fill="#14532d">2 · JOURNALISE</text>
+        <text x="232" y="73" text-anchor="middle" font-size="10.5" font-weight="400" fill="#14532d">book of original entry</text>
+        <rect x="326" y="34" width="128" height="50" rx="9" fill="#fef3c7" stroke="#d97706" stroke-width="2"/>
+        <text x="390" y="56" text-anchor="middle" fill="#78350f">3 · POST</text>
+        <text x="390" y="73" text-anchor="middle" font-size="10.5" font-weight="400" fill="#78350f">to the ledger</text>
+        <rect x="484" y="34" width="146" height="50" rx="9" fill="#f3e8ff" stroke="#9333ea" stroke-width="2"/>
+        <text x="557" y="56" text-anchor="middle" fill="#581c87">4 · TRIAL BALANCE</text>
+        <text x="557" y="73" text-anchor="middle" font-size="10.5" font-weight="400" fill="#581c87">prove Dr = Cr</text>
+      </g>
+      <line x1="141" y1="59" x2="163" y2="59" stroke="#64748b" stroke-width="2" marker-end="url(#ar3)"/>
+      <line x1="299" y1="59" x2="321" y2="59" stroke="#64748b" stroke-width="2" marker-end="url(#ar3)"/>
+      <line x1="457" y1="59" x2="479" y2="59" stroke="#64748b" stroke-width="2" marker-end="url(#ar3)"/>
+    </svg>
+    <div class="caption">Figure 5 — the recording process, end to end.</div>
+  </div>
+
+  <div class="tip"><span class="tag">🎯 Exam tip</span>
+  Straight from the slides: <i>"Posting: ______"</i> → <b>transfers journal entries to ledger accounts</b>.
+  The wrong options are all reversals — "normally occurs before journalizing" (no, after), "transfers
+  ledger data to the journal" (backwards), "is an optional step" (it isn't).</div>
+
+  <h3>Two more named things</h3>
+  <p>The <b>standard form of account</b> used in practice is the <b>three-column form of account</b>
+  (debit, credit, and a running balance column) — the T-account is the teaching simplification. And the
+  <b>chart of accounts</b> is the list of all account names and numbers a company uses.</p>
+
+  <div class="def"><span class="tag">📌 The three steps of transaction analysis</span>
+  <b>1.</b> Determine <b>what type of account</b> is involved. <b>2.</b> Determine what items
+  <b>increased or decreased</b> and <b>by how much</b>. <b>3.</b> Translate the increases and decreases
+  into <b>debits and credits</b>.</div>
+
+  <div class="facts"><span class="tag">Hard facts — Ch 2 LO 3</span>
+  <table>
+    <tbody>
+      <tr><td>General ledger contains</td><td><b>all</b> the asset, liability and owner's equity accounts</td></tr>
+      <tr><td>Posting</td><td><b>transferring journal entries to the ledger accounts</b></td></tr>
+      <tr><td>Standard form of account</td><td><b>three-column</b> form of account</td></tr>
+      <tr><td>Chart of accounts</td><td>the list of account names and numbers used by the company</td></tr>
+      <tr><td>Three steps of transaction analysis</td><td>type of account → what increased/decreased and by how much → translate into debits and credits</td></tr>
+    </tbody>
+  </table></div>
+</section>
+
+<section id="c2-tb">
+  <h2><span class="kicker">Chapter 2 · LO 4</span>The trial balance</h2>
+
+  <div class="def"><span class="tag">📌 Definition</span>
+  A <b>trial balance</b> is a list of accounts and their balances at a given time, prepared to prove that
+  <b>total debits equal total credits</b>.</div>
+
+  <div class="confusion"><span class="tag">⚠️ The most-asked idea in this chapter</span>
+  A trial balance that balances does <b>not</b> prove the books are correct. Learn these five
+  <b>limitations</b> — "the trial balance may balance even when…" is a standing exam favourite:
+  <ol>
+    <li>A transaction is <b>not journalized</b>.</li>
+    <li>A correct journal entry is <b>not posted</b>.</li>
+    <li>A journal entry is <b>posted twice</b>.</li>
+    <li><b>Incorrect accounts</b> are used in journalizing or posting.</li>
+    <li><b>Offsetting errors</b> are made in recording the amount of a transaction.</li>
+  </ol>
+  The pattern: any error that hits debits and credits <i>equally</i> stays invisible.</div>
+
+  <h3>Presentation rules — free marks if you know them</h3>
+  <table>
+    <thead><tr><th>Dollar signs</th><th>Underlining</th></tr></thead>
+    <tbody><tr>
+      <td>Do <b>not</b> appear in journals or ledgers. Typically used <b>only in the trial balance and the
+      financial statements</b>. Shown only for the <b>first item</b> in a column and for the <b>total</b>
+      of that column.</td>
+      <td>A <b>single line</b> is placed under the column of figures to be added or subtracted. Totals are
+      <b>double-underlined</b>.</td>
+    </tr></tbody>
+  </table>
+
+  <div class="facts"><span class="tag">Hard facts — Ch 2 LO 4</span>
+  <table>
+    <tbody>
+      <tr><td>Trial balance proves</td><td>total <b>debits equal</b> total <b>credits</b></td></tr>
+      <tr><td>5 limitations</td><td>transaction not journalized · correct entry not posted · entry posted twice · incorrect accounts used · offsetting errors</td></tr>
+      <tr><td>Dollar signs appear in</td><td>the <b>trial balance and financial statements</b> only — never journals or ledgers</td></tr>
+      <tr><td>Dollar signs shown for</td><td>the <b>first item</b> in a column and the <b>total</b></td></tr>
+      <tr><td>Underlining</td><td><b>single line</b> before adding; totals <b>double-underlined</b></td></tr>
+    </tbody>
+  </table></div>
+</section>
+
+<section id="beyers">
+  <h2><span class="kicker">Long question · full walkthrough</span>Beyers Security Company (E2.17)</h2>
+
+  <p>This is the shape of the 10-mark question: a list of transactions, then <b>(a)</b> journalize,
+  <b>(b)</b> post to T-accounts, <b>(c)</b> prepare a trial balance. Do it end to end here and the real
+  one holds no surprises.</p>
+
+  <div class="def"><span class="tag">📌 The transactions — October 2020</span>
+  <b>1</b> Invested $66,000 cash in the business · <b>2</b> Hired a part-time security consultant, salary
+  $2,000/month, first day of work October 15 · <b>4</b> Paid one month of rent for building, $2,000 ·
+  <b>7</b> Purchased equipment for $18,000, paying $4,000 cash and the balance on account · <b>8</b> Paid
+  $500 for advertising · <b>10</b> Received bill for equipment repair cost, $390 · <b>12</b> Provided
+  security services for an event for $3,200 on account · <b>16</b> Purchased supplies for $410 on account ·
+  <b>21</b> Paid balance due from October 7 purchase of equipment · <b>24</b> Received and paid utility
+  bill, $148 · <b>27</b> Received payment from customer for October 12 services · <b>31</b> Paid employee
+  salaries and wages, $5,100.</div>
+
+  <h3>(a) Journalize</h3>
+  <p>Written exactly as it should appear on your script — debit flush left, credit indented, explanation
+  underneath.</p>
+
+  <div class="gj">
+    <div class="gjhead"><span>General Journal</span><span class="pg">Page J1</span></div>
+    <table>
+      <thead><tr><th class="dt">Date</th><th>Account Titles and Explanation</th>
+        <th class="ref">Ref.</th><th class="amt">Debit</th><th class="amt">Credit</th></tr></thead>
+      <tbody>
+        <tr><td class="dt">2020<br>Oct. 1</td><td>Cash</td><td class="ref">101</td><td class="amt">66,000</td><td class="amt"></td></tr>
+        <tr><td class="dt"></td><td class="cr-title">Owner's Capital</td><td class="ref">301</td><td class="amt"></td><td class="amt">66,000</td></tr>
+        <tr><td class="dt"></td><td class="expl">(Owner's investment in business)</td><td class="ref"></td><td class="amt"></td><td class="amt"></td></tr>
+        <tr class="sep"><td colspan="5"></td></tr>
+
+        <tr><td class="dt">2</td><td class="expl" style="padding-left:0"><b style="font-style:normal">No entry</b> — hiring an employee is not a transaction; work has not begun and nothing is owed yet.</td><td class="ref"></td><td class="amt">—</td><td class="amt">—</td></tr>
+        <tr class="sep"><td colspan="5"></td></tr>
+
+        <tr><td class="dt">4</td><td>Rent Expense</td><td class="ref">729</td><td class="amt">2,000</td><td class="amt"></td></tr>
+        <tr><td class="dt"></td><td class="cr-title">Cash</td><td class="ref">101</td><td class="amt"></td><td class="amt">2,000</td></tr>
+        <tr><td class="dt"></td><td class="expl">(Paid one month's rent)</td><td class="ref"></td><td class="amt"></td><td class="amt"></td></tr>
+        <tr class="sep"><td colspan="5"></td></tr>
+
+        <tr><td class="dt">7</td><td>Equipment</td><td class="ref">157</td><td class="amt">18,000</td><td class="amt"></td></tr>
+        <tr><td class="dt"></td><td class="cr-title">Cash</td><td class="ref">101</td><td class="amt"></td><td class="amt">4,000</td></tr>
+        <tr><td class="dt"></td><td class="cr-title">Accounts Payable</td><td class="ref">201</td><td class="amt"></td><td class="amt">14,000</td></tr>
+        <tr><td class="dt"></td><td class="expl">(Purchased equipment for cash and on account)</td><td class="ref"></td><td class="amt"></td><td class="amt"></td></tr>
+        <tr class="sep"><td colspan="5"></td></tr>
+
+        <tr><td class="dt">8</td><td>Advertising Expense</td><td class="ref">610</td><td class="amt">500</td><td class="amt"></td></tr>
+        <tr><td class="dt"></td><td class="cr-title">Cash</td><td class="ref">101</td><td class="amt"></td><td class="amt">500</td></tr>
+        <tr><td class="dt"></td><td class="expl">(Paid for advertising)</td><td class="ref"></td><td class="amt"></td><td class="amt"></td></tr>
+        <tr class="sep"><td colspan="5"></td></tr>
+
+        <tr><td class="dt">10</td><td>Maintenance and Repairs Expense</td><td class="ref">610</td><td class="amt">390</td><td class="amt"></td></tr>
+        <tr><td class="dt"></td><td class="cr-title">Accounts Payable</td><td class="ref">201</td><td class="amt"></td><td class="amt">390</td></tr>
+        <tr><td class="dt"></td><td class="expl">(Received bill for equipment repair)</td><td class="ref"></td><td class="amt"></td><td class="amt"></td></tr>
+        <tr class="sep"><td colspan="5"></td></tr>
+
+        <tr><td class="dt">12</td><td>Accounts Receivable</td><td class="ref">112</td><td class="amt">3,200</td><td class="amt"></td></tr>
+        <tr><td class="dt"></td><td class="cr-title">Service Revenue</td><td class="ref">400</td><td class="amt"></td><td class="amt">3,200</td></tr>
+        <tr><td class="dt"></td><td class="expl">(Performed services on account)</td><td class="ref"></td><td class="amt"></td><td class="amt"></td></tr>
+        <tr class="sep"><td colspan="5"></td></tr>
+
+        <tr><td class="dt">16</td><td>Supplies</td><td class="ref">126</td><td class="amt">410</td><td class="amt"></td></tr>
+        <tr><td class="dt"></td><td class="cr-title">Accounts Payable</td><td class="ref">201</td><td class="amt"></td><td class="amt">410</td></tr>
+        <tr><td class="dt"></td><td class="expl">(Purchased supplies on account)</td><td class="ref"></td><td class="amt"></td><td class="amt"></td></tr>
+        <tr class="sep"><td colspan="5"></td></tr>
+
+        <tr><td class="dt">21</td><td>Accounts Payable</td><td class="ref">201</td><td class="amt">14,000</td><td class="amt"></td></tr>
+        <tr><td class="dt"></td><td class="cr-title">Cash</td><td class="ref">101</td><td class="amt"></td><td class="amt">14,000</td></tr>
+        <tr><td class="dt"></td><td class="expl">(Paid balance due on equipment)</td><td class="ref"></td><td class="amt"></td><td class="amt"></td></tr>
+        <tr class="sep"><td colspan="5"></td></tr>
+
+        <tr><td class="dt">24</td><td>Utilities Expense</td><td class="ref">732</td><td class="amt">148</td><td class="amt"></td></tr>
+        <tr><td class="dt"></td><td class="cr-title">Cash</td><td class="ref">101</td><td class="amt"></td><td class="amt">148</td></tr>
+        <tr><td class="dt"></td><td class="expl">(Received and paid utility bill)</td><td class="ref"></td><td class="amt"></td><td class="amt"></td></tr>
+        <tr class="sep"><td colspan="5"></td></tr>
+
+        <tr><td class="dt">27</td><td>Cash</td><td class="ref">101</td><td class="amt">3,200</td><td class="amt"></td></tr>
+        <tr><td class="dt"></td><td class="cr-title">Accounts Receivable</td><td class="ref">112</td><td class="amt"></td><td class="amt">3,200</td></tr>
+        <tr><td class="dt"></td><td class="expl">(Collected cash on account)</td><td class="ref"></td><td class="amt"></td><td class="amt"></td></tr>
+        <tr class="sep"><td colspan="5"></td></tr>
+
+        <tr><td class="dt">31</td><td>Salaries and Wages Expense</td><td class="ref">726</td><td class="amt">5,100</td><td class="amt"></td></tr>
+        <tr><td class="dt"></td><td class="cr-title">Cash</td><td class="ref">101</td><td class="amt"></td><td class="amt">5,100</td></tr>
+        <tr><td class="dt"></td><td class="expl">(Paid salaries and wages)</td><td class="ref"></td><td class="amt"></td><td class="amt"></td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="confusion"><span class="tag">⚠️ The four decisions that decide your mark</span>
+  <b>Oct 2</b> — no entry. Hiring is not a transaction. <b>Oct 10</b> — the repair bill is an
+  <b>expense now</b>, even though it's unpaid; the credit goes to Accounts Payable, not Cash.
+  <b>Oct 21</b> — paying the equipment balance debits <b>Accounts Payable</b>, not Equipment; the asset
+  was already recorded on Oct 7. <b>Oct 27</b> — collecting the Oct 12 receivable is <b>not revenue
+  again</b>; it just swaps A/R for Cash.</div>
+
+  <h3>(b) Post to T-accounts</h3>
+  <p>Every debit from the journal goes on the <b>left</b> of its account, every credit on the
+  <b>right</b>. Then foot each side and write the balance on the larger side.</p>
+
+  <div class="example"><span class="tag">✍️ Cash, worked in order</span>
+    <div class="step">66,000 − 2,000 − 4,000 − 500 − 14,000 − 148 + 3,200 − 5,100</div>
+    <div class="step">= 64,000 → 60,000 → 59,500 → 45,500 → 45,352 → 48,552 → <b>$43,452 debit balance</b></div>
+  </div>
+
+  <div class="tgrid">
+    <div class="tacct"><div class="nm">Cash</div><div class="tt">
+      <div>66,000</div><div>2,000</div>
+      <div>3,200</div><div>4,000</div>
+      <div class="empty">.</div><div>500</div>
+      <div class="empty">.</div><div>14,000</div>
+      <div class="empty">.</div><div>148</div>
+      <div class="empty">.</div><div>5,100</div>
+      <div class="bal">Bal. 43,452 Dr</div></div></div>
+
+    <div class="tacct"><div class="nm">Accounts Receivable</div><div class="tt">
+      <div>3,200</div><div>3,200</div>
+      <div class="bal">Bal. 0</div></div></div>
+
+    <div class="tacct"><div class="nm">Supplies</div><div class="tt">
+      <div>410</div><div class="empty">.</div>
+      <div class="bal">Bal. 410 Dr</div></div></div>
+
+    <div class="tacct"><div class="nm">Equipment</div><div class="tt">
+      <div>18,000</div><div class="empty">.</div>
+      <div class="bal">Bal. 18,000 Dr</div></div></div>
+
+    <div class="tacct"><div class="nm">Accounts Payable</div><div class="tt">
+      <div>14,000</div><div>14,000</div>
+      <div class="empty">.</div><div>390</div>
+      <div class="empty">.</div><div>410</div>
+      <div class="bal">Bal. 800 Cr</div></div></div>
+
+    <div class="tacct"><div class="nm">Owner's Capital</div><div class="tt">
+      <div class="empty">.</div><div>66,000</div>
+      <div class="bal">Bal. 66,000 Cr</div></div></div>
+
+    <div class="tacct"><div class="nm">Service Revenue</div><div class="tt">
+      <div class="empty">.</div><div>3,200</div>
+      <div class="bal">Bal. 3,200 Cr</div></div></div>
+
+    <div class="tacct"><div class="nm">Rent Expense</div><div class="tt">
+      <div>2,000</div><div class="empty">.</div>
+      <div class="bal">Bal. 2,000 Dr</div></div></div>
+
+    <div class="tacct"><div class="nm">Advertising Expense</div><div class="tt">
+      <div>500</div><div class="empty">.</div>
+      <div class="bal">Bal. 500 Dr</div></div></div>
+
+    <div class="tacct"><div class="nm">Maintenance &amp; Repairs Exp.</div><div class="tt">
+      <div>390</div><div class="empty">.</div>
+      <div class="bal">Bal. 390 Dr</div></div></div>
+
+    <div class="tacct"><div class="nm">Utilities Expense</div><div class="tt">
+      <div>148</div><div class="empty">.</div>
+      <div class="bal">Bal. 148 Dr</div></div></div>
+
+    <div class="tacct"><div class="nm">Salaries &amp; Wages Expense</div><div class="tt">
+      <div>5,100</div><div class="empty">.</div>
+      <div class="bal">Bal. 5,100 Dr</div></div></div>
+  </div>
+
+  <h3>(c) Prepare the trial balance</h3>
+  <p>Note the <b>three-line heading</b> — company, statement name, date. Marks are lost for omitting it.</p>
+
+  <div class="stmt">
+    <div class="hd">
+      <div class="co">Beyers Security Company</div>
+      <div class="ti">Trial Balance</div>
+      <div class="dt">October 31, 2020</div>
+    </div>
+    <table>
+      <thead><tr><th>Account</th><th class="amt">Debit</th><th class="amt">Credit</th></tr></thead>
+      <tbody>
+        <tr><td>Cash</td><td class="amt">$43,452</td><td class="amt"></td></tr>
+        <tr><td>Supplies</td><td class="amt">410</td><td class="amt"></td></tr>
+        <tr><td>Equipment</td><td class="amt">18,000</td><td class="amt"></td></tr>
+        <tr><td>Accounts Payable</td><td class="amt"></td><td class="amt">$&nbsp;&nbsp;&nbsp;800</td></tr>
+        <tr><td>Owner's Capital</td><td class="amt"></td><td class="amt">66,000</td></tr>
+        <tr><td>Service Revenue</td><td class="amt"></td><td class="amt">3,200</td></tr>
+        <tr><td>Rent Expense</td><td class="amt">2,000</td><td class="amt"></td></tr>
+        <tr><td>Advertising Expense</td><td class="amt">500</td><td class="amt"></td></tr>
+        <tr><td>Maintenance and Repairs Expense</td><td class="amt">390</td><td class="amt"></td></tr>
+        <tr><td>Utilities Expense</td><td class="amt">148</td><td class="amt"></td></tr>
+        <tr><td>Salaries and Wages Expense</td><td class="amt">5,100</td><td class="amt"></td></tr>
+        <tr class="tot"><td>&nbsp;</td><td class="amt">$70,000</td><td class="amt">$70,000</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="tip"><span class="tag">🎯 Presentation marks</span>
+  Note the dollar signs: on the <b>first figure of each column</b> and on the <b>totals</b> only.
+  Accounts Receivable has a zero balance so it's omitted from the trial balance. Totals get a
+  <b>double underline</b>.</div>
+</section>
+"""
+
+# ────────────────────────────────────────────────────────── PRACTICE ──
+PRACTICE = r"""
+  <h3 style="margin-top:26px">Part A — Fill in the blanks <span class="badge b-fill">5 marks</span></h3>
+
+  <details><summary><span class="qid">F1</span> The three basic activities of accounting are
+    <span class="blank">identifies</span>, <span class="blank">records</span> and
+    <span class="blank">communicates</span>.<span class="badge b-fill">fill</span></summary>
+    <div class="ans"><b>identifies · records · communicates</b></div></details>
+
+  <details><summary><span class="qid">F2</span> GAAP stands for
+    <span class="blank">Generally Accepted Accounting Principles</span>.<span class="badge b-fill">fill</span></summary>
+    <div class="ans"><b>Generally Accepted Accounting Principles</b></div></details>
+
+  <details><summary><span class="qid">F3</span> The <span class="blank">historical cost</span> principle
+    dictates that companies record assets at their cost.<span class="badge b-fill">fill</span></summary>
+    <div class="ans"><b>historical cost</b> (also accepted: <i>cost</i>) principle</div></details>
+
+  <details><summary><span class="qid">F4</span> The basic accounting equation is Assets =
+    <span class="blank">Liabilities</span> + <span class="blank">Owner's Equity</span>.<span class="badge b-fill">fill</span></summary>
+    <div class="ans"><b>Liabilities + Owner's Equity</b></div></details>
+
+  <details><summary><span class="qid">F5</span> Owner's equity is also referred to as
+    <span class="blank">residual</span> equity.<span class="badge b-fill">fill</span></summary>
+    <div class="ans"><b>residual</b> equity</div></details>
+
+  <details><summary><span class="qid">F6</span> The <span class="blank">monetary unit</span> assumption
+    requires that only transaction data expressible in terms of money be included in the accounting
+    records.<span class="badge b-fill">fill</span></summary>
+    <div class="ans"><b>monetary unit</b> assumption</div></details>
+
+  <details><summary><span class="qid">F7</span> The <span class="blank">economic entity</span> assumption
+    requires that the activities of the entity be kept separate from its owner and all other economic
+    entities.<span class="badge b-fill">fill</span></summary>
+    <div class="ans"><b>economic entity</b> assumption</div></details>
+
+  <details><summary><span class="qid">F8</span> In a corporation, ownership is divided into
+    <span class="blank">shares of stock</span>.<span class="badge b-fill">fill</span></summary>
+    <div class="ans"><b>shares of stock</b></div></details>
+
+  <details><summary><span class="qid">F9</span> Debit means <span class="blank">left</span> and credit
+    means <span class="blank">right</span>.<span class="badge b-fill">fill</span></summary>
+    <div class="ans"><b>left</b> / <b>right</b></div></details>
+
+  <details><summary><span class="qid">F10</span> The journal is called the book of
+    <span class="blank">original entry</span>.<span class="badge b-fill">fill</span></summary>
+    <div class="ans">book of <b>original entry</b></div></details>
+
+  <details><summary><span class="qid">F11</span> <span class="blank">Posting</span> is the process of
+    transferring journal entries to the ledger accounts.<span class="badge b-fill">fill</span></summary>
+    <div class="ans"><b>Posting</b></div></details>
+
+  <details><summary><span class="qid">F12</span> An entry that involves three or more accounts is called a
+    <span class="blank">compound</span> journal entry.<span class="badge b-fill">fill</span></summary>
+    <div class="ans"><b>compound</b> journal entry</div></details>
+
+  <details><summary><span class="qid">F13</span> The normal balance of an account is on the
+    <span class="blank">increase</span> side.<span class="badge b-fill">fill</span></summary>
+    <div class="ans"><b>increase</b> side</div></details>
+
+  <details><summary><span class="qid">F14</span> The standard form of account used in practice is the
+    <span class="blank">three-column</span> form of account.<span class="badge b-fill">fill</span></summary>
+    <div class="ans"><b>three-column</b> form</div></details>
+
+  <details><summary><span class="qid">F15</span> The three standard-setting bodies are the
+    <span class="blank">FASB</span>, the <span class="blank">SEC</span> and the
+    <span class="blank">IASB</span>.<span class="badge b-fill">fill</span></summary>
+    <div class="ans"><b>FASB</b> (Financial Accounting Standards Board) · <b>SEC</b> (Securities and
+    Exchange Commission) · <b>IASB</b> (International Accounting Standards Board)</div></details>
+
+  <details><summary><span class="qid">F16</span> The four financial statements are the
+    <span class="blank">income statement</span>, <span class="blank">owner's equity statement</span>,
+    <span class="blank">balance sheet</span> and <span class="blank">statement of cash flows</span>.<span class="badge b-fill">fill</span></summary>
+    <div class="ans"><b>income statement · owner's equity statement · balance sheet · statement of cash flows</b></div></details>
+
+  <details><summary><span class="qid">F17</span> Dollar signs appear only in the
+    <span class="blank">trial balance</span> and the <span class="blank">financial statements</span>.<span class="badge b-fill">fill</span></summary>
+    <div class="ans"><b>trial balance</b> and <b>financial statements</b> — never in journals or ledgers</div></details>
+
+  <h3 style="margin-top:30px">Part B — Short questions <span class="badge b-short">5 marks</span></h3>
+
+  <details><summary><span class="qid">S1</span> State the three basic activities of accounting and what
+    each does.<span class="badge b-short">short</span></summary>
+    <div class="ans">Accounting <b>identifies</b> the economic events relevant to the business,
+    <b>records</b> those events systematically in monetary terms, and <b>communicates</b> the resulting
+    information to interested users through financial statements.</div></details>
+
+  <details><summary><span class="qid">S2</span> Distinguish between bookkeeping and accounting.<span class="badge b-short">short</span></summary>
+    <div class="ans">Bookkeeping is only the <b>recording</b> function — the systematic logging of
+    transactions. Accounting is broader: it <b>includes</b> bookkeeping but also identifies which events
+    should be recorded and communicates and interprets the results for users.</div></details>
+
+  <details><summary><span class="qid">S3</span> Differentiate between internal and external users, giving
+    two examples of each.<span class="badge b-short">short</span></summary>
+    <div class="ans"><b>Internal users</b> are managers within the organisation who plan and control
+    operations — e.g. the store manager, a production supervisor. <b>External users</b> are outside the
+    organisation — e.g. investors, creditors, the SEC, customers.</div></details>
+
+  <details><summary><span class="qid">S4</span> State the monetary unit assumption and give one thing it
+    excludes.<span class="badge b-short">short</span></summary>
+    <div class="ans">It requires that only transaction data <b>expressible in terms of money</b> be
+    included in the accounting records. So a factor like employee morale or the health of the owner,
+    however important, is excluded because it cannot be measured in money.</div></details>
+
+  <details><summary><span class="qid">S5</span> Why is owner's equity called residual equity?<span class="badge b-short">short</span></summary>
+    <div class="ans">Because the owner's claim ranks last. Rearranging the equation, Owner's Equity =
+    Assets − Liabilities, so the owner receives whatever <b>remains</b> after all creditor claims are
+    settled. On liquidation, creditors must be paid before owners.</div></details>
+
+  <details><summary><span class="qid">S6</span> Name the three contributions the journal makes to the
+    recording process.<span class="badge b-short">short</span></summary>
+    <div class="ans">(1) It discloses the <b>complete effects</b> of a transaction in one place.
+    (2) It provides a <b>chronological record</b> of all transactions. (3) It helps <b>prevent or locate
+    errors</b>, because debit and credit amounts for each entry can be readily compared.</div></details>
+
+  <details><summary><span class="qid">S7</span> Which accounts have a normal debit balance and which a
+    normal credit balance?<span class="badge b-short">short</span></summary>
+    <div class="ans"><b>Normal debit:</b> assets, expenses, owner's drawings. <b>Normal credit:</b>
+    liabilities, owner's capital, revenues. The normal balance is always on the side that
+    <b>increases</b> the account.</div></details>
+
+  <details><summary><span class="qid">S8</span> A trial balance balances. Does that prove the ledger is
+    correct? Give two reasons.<span class="badge b-short">short</span></summary>
+    <div class="ans">No. It only proves total debits equal total credits. It will still balance if a
+    transaction was <b>never journalized</b>, if a correct entry was <b>never posted</b>, if an entry was
+    <b>posted twice</b>, if <b>incorrect accounts</b> were used, or if <b>offsetting errors</b> were
+    made — any error affecting debits and credits equally stays hidden.</div></details>
+
+  <details><summary><span class="qid">S9</span> Distinguish a simple entry from a compound entry.<span class="badge b-short">short</span></summary>
+    <div class="ans">A <b>simple entry</b> involves exactly <b>two accounts</b> — one debit and one
+    credit. A <b>compound entry</b> involves <b>three or more accounts</b>, for example a purchase part
+    paid in cash and part on account.</div></details>
+
+  <details><summary><span class="qid">S10</span> Explain the difference between an expense and a drawing.<span class="badge b-short">short</span></summary>
+    <div class="ans">An <b>expense</b> is the cost of assets consumed or services used <b>in the process
+    of earning revenue</b>, and it appears on the income statement. A <b>drawing</b> is the owner taking
+    cash or other assets out of the business <b>for personal use</b>; it reduces owner's equity but is
+    <b>not</b> an expense and never affects net income.</div></details>
+
+  <h3 style="margin-top:30px">Part C — Long questions <span class="badge b-long">10 marks</span></h3>
+
+  <details><summary><span class="qid">L1</span> State the accounting equation, define each component, and
+    explain what the expanded equation adds.<span class="badge b-long">long</span></summary>
+    <div class="ans">
+    <b>The equation:</b> Assets = Liabilities + Owner's Equity.<br><br>
+    <b>Assets</b> are resources a business owns which provide future services or benefits — cash,
+    supplies, equipment, accounts receivable. <b>Liabilities</b> are claims against those assets: the
+    debts and obligations owed to creditors, such as accounts payable, notes payable and salaries and
+    wages payable. <b>Owner's equity</b> is the ownership claim on total assets, also called residual
+    equity because owners rank behind creditors if the business is liquidated.<br><br>
+    <b>The expanded equation</b> breaks owner's equity into its four moving parts:<br>
+    Assets = Liabilities + Owner's Capital − Owner's Drawings + Revenues − Expenses.<br>
+    Investments by the owner and revenues <b>increase</b> equity; drawings and expenses <b>decrease</b>
+    it. This is what lets a single equation carry both the balance sheet and the income statement.<br><br>
+    <b>Why it matters:</b> it provides the underlying framework for recording and summarising every
+    economic event, and it must remain in balance after every transaction — which is exactly what the
+    double-entry system enforces.</div></details>
+
+  <details><summary><span class="qid">L2</span> Beyers Security Company — journalize the October
+    transactions, post to T-accounts, and prepare a trial balance at October 31, 2020.<span class="badge b-long">long</span></summary>
+    <div class="ans">Full worked solution is in the <a href="#beyers">Beyers Security walkthrough</a>
+    above. Headline answers to check yourself against: <b>Cash $43,452 Dr</b>, <b>Accounts Payable
+    $800 Cr</b>, <b>trial balance totals $70,000 = $70,000</b>. The four judgement calls are: Oct 2 = <b>no
+    entry</b>; Oct 10 = expense recorded although unpaid; Oct 21 = debit Accounts Payable, not Equipment;
+    Oct 27 = no second revenue.</div></details>
+
+  <details><summary><span class="qid">L3</span> Describe the four financial statements, what each reports,
+    and how they connect.<span class="badge b-long">long</span></summary>
+    <div class="ans">
+    <b>1 · Income statement</b> — reports revenues and expenses for a <b>period of time</b>; lists
+    revenues first, then expenses, and shows net income or net loss. It excludes owner investments and
+    withdrawals.<br>
+    <b>2 · Owner's equity statement</b> — reports the changes in owner's equity over the <b>same period</b>:
+    beginning capital + investments + net income − drawings = ending capital.<br>
+    <b>3 · Balance sheet</b> — reports assets, liabilities and owner's equity at a <b>specific date</b>;
+    a snapshot. Assets are listed first, then liabilities and owner's equity, and total assets must equal
+    total liabilities plus owner's equity.<br>
+    <b>4 · Statement of cash flows</b> — reports cash receipts and payments for a period, answering where
+    cash came from, what it was used for, and the change in the cash balance.<br><br>
+    <b>The chain:</b> net income from the income statement is needed for the owner's equity statement; the
+    ending owner's equity from that is needed for the balance sheet; and the balance sheet together with
+    the income statement is needed to prepare the statement of cash flows.<br><br>
+    <b>Illustrated with Softbyte:</b> net income $4,700 − $1,950 = <b>$2,750</b>; ending equity
+    $0 + $15,000 + $2,750 − $1,300 = <b>$16,450</b>; balance sheet $1,600 + $16,450 =
+    <b>$18,050</b> = total assets. ✔</div></details>
+
+  <details><summary><span class="qid">L4</span> Explain the double-entry system and the rules of debit and
+    credit for all five account types, with an example of each.<span class="badge b-long">long</span></summary>
+    <div class="ans">
+    Under the <b>double-entry system</b>, every transaction affects <b>two or more accounts</b>, and is
+    recorded by debiting at least one account and crediting at least one other. Total debits must always
+    equal total credits — this is what keeps the accounting equation in balance. "Debit" simply means the
+    <b>left</b> side of an account and "credit" the <b>right</b>; neither implies good or bad.<br><br>
+    The <b>normal balance</b> of any account is on the side that <b>increases</b> it:<br>
+    • <b>Assets</b> — increase by debit. <i>e.g. receiving $66,000 cash → debit Cash.</i><br>
+    • <b>Liabilities</b> — increase by credit. <i>e.g. buying supplies on account → credit Accounts Payable.</i><br>
+    • <b>Owner's Capital</b> — increase by credit. <i>e.g. the owner invests → credit Owner's Capital.</i><br>
+    • <b>Revenues</b> — increase by credit, following the <b>same</b> rules as capital, because revenue
+      benefits the owner. <i>e.g. services performed → credit Service Revenue.</i><br>
+    • <b>Expenses</b> and <b>Owner's Drawings</b> — increase by debit, the <b>opposite</b> of capital,
+      because both reduce owner's equity. <i>e.g. paying rent → debit Rent Expense.</i></div></details>
+
+  <details><summary><span class="qid">L5</span> What is a trial balance, why is it prepared, and what are
+    its limitations?<span class="badge b-long">long</span></summary>
+    <div class="ans">
+    A <b>trial balance</b> is a list of all ledger accounts and their balances at a given date, with debit
+    balances in one column and credit balances in another. It is prepared <b>after posting</b> and before
+    the financial statements, and its purpose is to <b>prove that total debits equal total credits</b> —
+    a first check on the mathematical accuracy of the ledger, and a convenient summary from which the
+    statements are drawn.<br><br>
+    <b>Its limitations</b> — the trial balance may still balance even when:<br>
+    1. a transaction is <b>not journalized</b> at all;<br>
+    2. a correct journal entry is <b>not posted</b>;<br>
+    3. a journal entry is <b>posted twice</b>;<br>
+    4. <b>incorrect accounts</b> are used in journalizing or posting;<br>
+    5. <b>offsetting errors</b> are made in recording the amount of a transaction.<br><br>
+    The common thread is that any error affecting debits and credits <b>equally</b> is invisible to the
+    trial balance. So a balanced trial balance proves arithmetic, not correctness.</div></details>
+
+  <details><summary><span class="qid">L6</span> Analyse the first five Softbyte transactions and show
+    their effect on the accounting equation.<span class="badge b-long">long</span></summary>
+    <div class="ans">
+    <b>1.</b> Ray Neal invests $15,000 cash → Cash +15,000; Owner's Capital +15,000. Asset and equity rise
+    together.<br>
+    <b>2.</b> Purchases equipment for $7,000 cash → Equipment +7,000; Cash −7,000. One asset exchanged for
+    another; <b>total assets unchanged</b>.<br>
+    <b>3.</b> Purchases supplies for $1,600 on credit → Supplies +1,600; Accounts Payable +1,600. Asset up,
+    liability up.<br>
+    <b>4.</b> Performs services for $1,200 cash → Cash +1,200; Revenues +1,200 (equity up).<br>
+    <b>5.</b> Receives a $250 advertising bill from the Daily News, unpaid → Accounts Payable +250;
+    Expenses +250 (equity down). <b>The expense is recorded when incurred, not when paid.</b><br><br>
+    After each one, Assets = Liabilities + Owner's Equity still holds — that is the dual effect in
+    action.</div></details>
+"""
+
+CHECKLIST = r"""
+<section id="checklist">
+  <h2><span class="kicker">Night before</span>Can you do all of these from memory?</h2>
+  <p>No notes. If you stumble on one, go back to that section's Hard Facts table.</p>
+  <ul class="checklist">
+    <li>Name the <b>three basic activities</b> of accounting, in order</li>
+    <li>Say what <b>bookkeeping</b> is and how it differs from accounting</li>
+    <li>Sort a mixed list into <b>internal</b> and <b>external</b> users</li>
+    <li>Expand <b>GAAP</b>, <b>FASB</b>, <b>SEC</b>, <b>IASB</b></li>
+    <li>State the <b>historical cost</b> and <b>fair value</b> principles, and the trade-off between them</li>
+    <li>State the <b>monetary unit</b> and <b>economic entity</b> assumptions</li>
+    <li>Compare <b>proprietorship / partnership / corporation</b> on ownership, liability, legal status</li>
+    <li>Write the <b>basic</b> and <b>expanded</b> accounting equations</li>
+    <li>Define assets, liabilities, owner's equity — and say why equity is called <b>residual</b></li>
+    <li>List what <b>increases</b> and what <b>decreases</b> owner's equity (two each)</li>
+    <li>Name <b>five sources of revenue</b> and four common expenses</li>
+    <li>State the <b>recording criterion</b> for whether an event is a transaction</li>
+    <li>Name the <b>four financial statements</b>, in preparation order, and what each reports</li>
+    <li>Say which statements are "<b>for a period</b>" and which is "<b>at a date</b>"</li>
+    <li>Explain the <b>chain</b>: net income → equity statement → balance sheet → cash flows</li>
+    <li>Say what <b>debit</b> and <b>credit</b> literally mean</li>
+    <li>List the <b>debit-normal</b> and <b>credit-normal</b> account types</li>
+    <li>State the <b>three contributions</b> of the journal</li>
+    <li>Define <b>journalizing</b>, <b>posting</b>, <b>compound entry</b>, <b>chart of accounts</b></li>
+    <li>Recite the <b>five limitations</b> of a trial balance</li>
+    <li>State the <b>dollar sign</b> and <b>underlining</b> rules</li>
+    <li>Journalize, post and trial-balance the <b>Beyers</b> problem without looking</li>
+  </ul>
+</section>
+"""
+
+out = tpl.replace("</style>", EXTRA_CSS + "\n</style>", 1)
+for k, v in {
+    "{{TITLE}}": "FMA CT-1 Study Guide — Basic Accounting & The Recording Process",
+    "{{META_DESCRIPTION}}": META,
+    "{{BRAND}}": "FMA · CT-1",
+    "{{NAV_LINKS}}": NAV,
+    "{{H1_TITLE}}": TITLE,
+    "{{PILLS}}": PILLS,
+    "{{SOURCE_LINE}}": SOURCE,
+    "{{CONTENT}}": CONTENT,
+    "{{PRACTICE}}": PRACTICE,
+    "{{FOOTER}}": FOOTER,
+}.items():
+    out = out.replace(k, v)
+
+# checklist goes after the practice section, before the footer
+out = out.replace("  <footer>", CHECKLIST + "\n  <footer>", 1)
+
+(HERE / "index.html").write_text(out)
+left = re.findall(r"\{\{[A-Z_]+\}\}", out)
+print("unfilled placeholders:", left or "none")
+print("bytes:", len(out))
