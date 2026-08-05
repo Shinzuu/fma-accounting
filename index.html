@@ -188,6 +188,7 @@
 
 
 
+
 <!--STUDY-DECK v1 START-->
 <style id="deckcss">/*STUDY-DECK*/
 html[data-subject="dm"]{--accent:#8b5cf6;--accent2:#6366f1;--star:#c4b5fd}
@@ -1694,6 +1695,7 @@ body.rot .rotexit{display:inline-flex;position:fixed;z-index:80;top:9px;right:9p
 
 
 
+
 <!--STUDY-DECK v1 START-->
 <script>/*STUDY-DECK*/
 (function(){
@@ -1717,7 +1719,7 @@ body.rot .rotexit{display:inline-flex;position:fixed;z-index:80;top:9px;right:9p
     kids.forEach(function(n){
       var el=n.nodeType===1, tag=el?n.tagName:'';
       var isCB=el&&n.classList&&n.classList.contains('cardbreak');
-      var brk=el&&(tag==='H3'||tag==='DETAILS'||isCB);
+      var brk=el&&(tag==='H3'||isCB);
       if(brk&&hasEl){ if(first&&secId){cur.id=secId;first=false;} deck.appendChild(cur); cur=mkCard(cls); cur.dataset.sec=secId; hasEl=false; }
       if(isCB) return;
       cur._in.appendChild(n); if(el) hasEl=true;
@@ -1729,20 +1731,19 @@ body.rot .rotexit{display:inline-flex;position:fixed;z-index:80;top:9px;right:9p
   var cards=[].slice.call(deck.querySelectorAll('.card'));
 
   var pcount=0;
-  cards.forEach(function(card){
-    var det=card.querySelector('details');
-    if(det){ pcount++; var pid='p'+pcount; card.dataset.pid=pid; card.classList.add('card-q');
-      var g=document.createElement('div'); g.className='grade';
-      g.innerHTML='<button class="g-got" data-g="got">Got it 👍</button><button class="g-miss" data-g="miss">Missed 👎</button>';
-      det.parentNode.insertBefore(g, det.nextSibling);
-      g.style.display=det.open?'flex':'none';
-      det.addEventListener('toggle', function(){ g.style.display=det.open?'flex':'none'; });
-      [].slice.call(g.querySelectorAll('button')).forEach(function(b){
-        if(store.grades[pid]===b.dataset.g) b.classList.add('on');
-        b.addEventListener('click', function(){ store.grades[pid]=b.dataset.g; save();
-          [].slice.call(g.querySelectorAll('button')).forEach(function(x){x.classList.toggle('on',x===b);}); renderScore(); });
-      });
-    }
+  [].slice.call(deck.querySelectorAll('details')).forEach(function(det){
+    pcount++; var pid='p'+pcount; det.dataset.pid=pid;
+    var card=det.closest('.card'); if(card) card.classList.add('card-q');
+    var g=document.createElement('div'); g.className='grade';
+    g.innerHTML='<button class="g-got" data-g="got">Got it 👍</button><button class="g-miss" data-g="miss">Missed 👎</button>';
+    det.parentNode.insertBefore(g, det.nextSibling);
+    g.style.display=det.open?'flex':'none';
+    det.addEventListener('toggle', function(){ g.style.display=det.open?'flex':'none'; });
+    [].slice.call(g.querySelectorAll('button')).forEach(function(b){
+      if(store.grades[pid]===b.dataset.g) b.classList.add('on');
+      b.addEventListener('click', function(){ store.grades[pid]=b.dataset.g; save();
+        [].slice.call(g.querySelectorAll('button')).forEach(function(x){x.classList.toggle('on',x===b);}); renderScore(); });
+    });
   });
 
   [].slice.call(deck.querySelectorAll('.fml')).forEach(function(f){
@@ -1762,8 +1763,8 @@ body.rot .rotexit{display:inline-flex;position:fixed;z-index:80;top:9px;right:9p
   deck.appendChild(scard); cards.push(scard);
   function renderScore(){
     var got=0, done=0, missed=[];
-    cards.forEach(function(card){ var pid=card.dataset.pid; if(!pid) return; var gr=store.grades[pid]; if(!gr) return;
-      done++; if(gr==='got') got++; else { var s=card.querySelector('summary'); missed.push({c:card, t:s?s.textContent.trim():pid}); } });
+    [].slice.call(deck.querySelectorAll('details[data-pid]')).forEach(function(det){ var gr=store.grades[det.dataset.pid]; if(!gr) return;
+      done++; if(gr==='got') got++; else { var s=det.querySelector('summary'); missed.push({c:det.closest('.card'), t:s?s.textContent.trim():det.dataset.pid}); } });
     var big=document.getElementById('scoreBig'), msg=document.getElementById('scoreMsg'), list=document.getElementById('scoreList');
     if(!big) return;
     big.textContent=got+' / '+pcount;
