@@ -213,7 +213,13 @@ body.deck-on .card{flex:0 0 100%;scroll-snap-align:center;scroll-snap-stop:alway
   padding:min(5vh,40px) max(20px,calc((100% - 780px)/2)) 92px}
 body.deck-on .card::-webkit-scrollbar{width:8px}
 body.deck-on .card::-webkit-scrollbar-thumb{background:var(--line);border-radius:8px}
-body.deck-on .card-hero{justify-content:center}
+/* `safe center` degrades to flex-start the moment the content is taller than
+   the frame. Plain `center` overflows equally in both directions, and the
+   half above the top edge cannot be scrolled to — scrollTop clamps at 0. In
+   landscape the card is only ~284px of usable height, so the title card lost
+   its heading off the top. Second declaration is ignored by engines that
+   don't support it, which keeps the old behaviour rather than breaking. */
+body.deck-on .card-hero{justify-content:center;justify-content:safe center}
 body.deck-on .card-hero .cardinner{margin:auto 0}
 body.deck-on .cardinner{zoom:var(--zoom);width:100%;max-width:780px;margin:0 auto}
 body.deck-on header.hero{margin:0}
@@ -280,7 +286,20 @@ body:not(.deck-on) .lesson{zoom:var(--zoom)}
 .rotbtn{display:none}
 body.rot .deck{transform-origin:top left;transform:rotate(90deg) translateY(-100%);width:100vh;height:100vw;top:0;left:0}
 body.rot{overflow:hidden}
+/* Rotated, the card's height is only 100vw, so the portrait 92px bottom
+   padding eats a third of the reading area. The deckbar needs ~58px. */
+body.rot.deck-on .card{padding:12px 15px 66px}
+/* Only .deck is rotated, so anything else still on screen keeps the portrait
+   orientation and lands across the reading area. The sticky topbar was the
+   worst of it: its 48px band maps onto the leftmost 48px of every line, so the
+   start of each line sat underneath it. Hide the portrait chrome in landscape —
+   the deck carries its own controls and the exit button restores it. */
+body.rot .topbar,
+body.rot #progress{display:none}
 .rotexit{display:none}
+/* Lives inside .deck (see appendChild below), so the rotation is inherited and
+   these coordinates are relative to the rotated frame — no transform needed
+   here, and nothing that depends on the button's own text width. */
 body.rot .rotexit{display:inline-flex;position:fixed;z-index:80;top:9px;right:9px;align-items:center;gap:6px;
   background:var(--panel);border:1px solid var(--line);border-radius:999px;padding:7px 13px;font-size:12px;font-weight:800;cursor:pointer;color:var(--ink)}
 /* ---- mobile ---- */
@@ -1813,7 +1832,7 @@ body.rot .rotexit{display:inline-flex;position:fixed;z-index:80;top:9px;right:9p
   body.appendChild(bar);
   document.getElementById('deckPrev').onclick=function(){ goTo(cur-1); };
   document.getElementById('deckNext').onclick=function(){ goTo(cur+1); };
-  var rx=document.createElement('button'); rx.className='rotexit'; rx.innerHTML='⟲ Exit landscape'; body.appendChild(rx);
+  var rx=document.createElement('button'); rx.className='rotexit'; rx.innerHTML='⟲ Exit landscape'; deck.appendChild(rx);
   function setRot(on){ body.classList.toggle('rot',on); setTbh();
     setTimeout(function(){ if(mode==='deck') deck.scrollTo({left:cards[cur].offsetLeft,behavior:'auto'}); }, 60); }
   var rbtn=document.getElementById('deckRot');
