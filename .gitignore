@@ -1,3 +1,5 @@
 *.pptx
 *.png
 .playwright-mcp/
+!og.png
+!apple-touch-icon.png
